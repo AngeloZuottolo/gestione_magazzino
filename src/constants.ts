@@ -17,8 +17,18 @@ export const INITIAL_PRODUCT_TYPES = [
 export const STORAGE_KEYS = {
   MOVEMENTS: 'warehouse_movements',
   PRODUCT_TYPES: 'warehouse_product_types',
+  BRANDS: 'warehouse_brands',
   USERS: 'warehouse_users',
 };
+
+export const INITIAL_BRANDS = [
+  'Dell',
+  'HP',
+  'Lenovo',
+  'Apple',
+  'Logitech',
+  'Microsoft'
+];
 
 export const INITIAL_LOCATIONS = [
   'Milano',

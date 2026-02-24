@@ -30,7 +30,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
 import { Movement, InventoryItem, MovementType, User } from './types';
-import { STORAGE_KEYS, INITIAL_PRODUCT_TYPES, INITIAL_LOCATIONS, exportToCSV } from './constants';
+import { STORAGE_KEYS, INITIAL_PRODUCT_TYPES, INITIAL_BRANDS, INITIAL_LOCATIONS, exportToCSV } from './constants';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -40,6 +40,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'inventory' | 'movements' | 'reports' | 'admin' | 'users'>('dashboard');
   const [movements, setMovements] = useState<Movement[]>([]);
   const [productTypes, setProductTypes] = useState<string[]>([]);
+  const [brands, setBrands] = useState<string[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
@@ -49,55 +50,76 @@ export default function App() {
 
   // Load data
   useEffect(() => {
-    const savedMovements = localStorage.getItem(STORAGE_KEYS.MOVEMENTS);
-    const savedTypes = localStorage.getItem(STORAGE_KEYS.PRODUCT_TYPES);
+    const fetchData = async () => {
+      try {
+        const [movRes, typeRes, brandRes, userRes] = await Promise.all([
+          fetch('/api/movements'),
+          fetch('/api/product_types'),
+          fetch('/api/brands'),
+          fetch('/api/users')
+        ]);
 
-    if (savedMovements) {
-      setMovements(JSON.parse(savedMovements));
-    } else {
-      // Initial mock data
-      const initialMovements: Movement[] = [
-        { id: 'C-1', type: 'Carico', productName: 'Laptop', brand: 'Dell', quantity: 10, isNew: true, date: '2026-02-20', notes: 'Primo acquisto anno', supplier: 'Amazon' },
-        { id: 'C-2', type: 'Carico', productName: 'Monitor', brand: 'LG', quantity: 5, isNew: true, date: '2026-02-21', notes: 'Stock ufficio', supplier: 'Eurome' },
-        { id: 'S-1', type: 'Scarico', productName: 'Laptop', brand: 'Dell', quantity: 1, isNew: true, date: '2026-02-22', notes: 'Nuovo assunto', assignee: 'Mario Rossi' },
-        { id: 'C-3', type: 'Carico', productName: 'Laptop', brand: 'Dell', quantity: 2, isNew: false, date: '2026-02-23', notes: 'Rientro da dipendente', supplier: 'Rientro' },
-      ];
-      setMovements(initialMovements);
-      localStorage.setItem(STORAGE_KEYS.MOVEMENTS, JSON.stringify(initialMovements));
-    }
+        const [movData, typeData, brandData, userData] = await Promise.all([
+          movRes.json(),
+          typeRes.json(),
+          brandRes.json(),
+          userRes.json()
+        ]);
 
-    if (savedTypes) {
-      setProductTypes(JSON.parse(savedTypes));
-    } else {
-      setProductTypes(INITIAL_PRODUCT_TYPES);
-      localStorage.setItem(STORAGE_KEYS.PRODUCT_TYPES, JSON.stringify(INITIAL_PRODUCT_TYPES));
-    }
+        setMovements(movData);
+        
+        if (typeData.length > 0) {
+          setProductTypes(typeData);
+        } else {
+          // Initialize with defaults if empty
+          for (const type of INITIAL_PRODUCT_TYPES) {
+            await fetch('/api/product_types', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: type })
+            });
+          }
+          setProductTypes(INITIAL_PRODUCT_TYPES);
+        }
 
-    const savedUsers = localStorage.getItem(STORAGE_KEYS.USERS);
-    if (savedUsers) {
-      setUsers(JSON.parse(savedUsers));
-    } else {
-      const initialUsers: User[] = [
-        { id: 'U-1', firstName: 'Mario', lastName: 'Rossi', location: 'Milano' },
-        { id: 'U-2', firstName: 'Giulia', lastName: 'Bianchi', location: 'Roma' },
-      ];
-      setUsers(initialUsers);
-      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(initialUsers));
-    }
+        if (brandData.length > 0) {
+          setBrands(brandData);
+        } else {
+          for (const brand of INITIAL_BRANDS) {
+            await fetch('/api/brands', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: brand })
+            });
+          }
+          setBrands(INITIAL_BRANDS);
+        }
+
+        if (userData.length > 0) {
+          setUsers(userData);
+        } else {
+          const initialUsers: User[] = [
+            { id: 'U-1', firstName: 'Mario', lastName: 'Rossi', location: 'Milano' },
+            { id: 'U-2', firstName: 'Giulia', lastName: 'Bianchi', location: 'Roma' },
+          ];
+          for (const user of initialUsers) {
+            await fetch('/api/users', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(user)
+            });
+          }
+          setUsers(initialUsers);
+        }
+      } catch (error) {
+        console.error("Error fetching data:", error);
+      }
+    };
+
+    fetchData();
   }, []);
 
-  // Save data
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.MOVEMENTS, JSON.stringify(movements));
-  }, [movements]);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.PRODUCT_TYPES, JSON.stringify(productTypes));
-  }, [productTypes]);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
-  }, [users]);
+  // Removed localStorage effects
 
   // Derived State: Inventory
   const inventory = useMemo(() => {
@@ -128,7 +150,7 @@ export default function App() {
     return Object.values(items).filter(item => item.total !== 0);
   }, [movements]);
 
-  const addMovement = (m: Omit<Movement, 'id'>) => {
+  const addMovement = async (m: Omit<Movement, 'id'>) => {
     const prefix = m.type === 'Carico' ? 'C' : 'S';
     const typeMovements = movements.filter(mov => mov.type === m.type);
     const nextId = typeMovements.length > 0 
@@ -140,42 +162,140 @@ export default function App() {
       id: `${prefix}-${nextId}`
     };
 
-    setMovements(prev => [newMovement, ...prev]);
-    setShowMovementModal({ show: false, type: null });
+    try {
+      await fetch('/api/movements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newMovement)
+      });
+
+      // Auto-populate lists if new values are provided
+      if (m.productName && !productTypes.includes(m.productName)) {
+        await fetch('/api/product_types', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: m.productName })
+        });
+        setProductTypes(prev => [...prev, m.productName]);
+      }
+      if (m.brand && !brands.includes(m.brand)) {
+        await fetch('/api/brands', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: m.brand })
+        });
+        setBrands(prev => [...prev, m.brand]);
+      }
+
+      setMovements(prev => [newMovement, ...prev]);
+      setShowMovementModal({ show: false, type: null });
+    } catch (error) {
+      console.error("Error adding movement:", error);
+    }
   };
 
-  const updateMovement = (id: string, updated: Partial<Movement>) => {
-    setMovements(prev => prev.map(m => m.id === id ? { ...m, ...updated } as Movement : m));
-    setShowMovementModal({ show: false, type: null });
+  const updateMovement = async (id: string, updated: Partial<Movement>) => {
+    const existing = movements.find(m => m.id === id);
+    if (!existing) return;
+    const fullMovement = { ...existing, ...updated };
+
+    try {
+      await fetch(`/api/movements/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fullMovement)
+      });
+      setMovements(prev => prev.map(m => m.id === id ? fullMovement : m));
+      setShowMovementModal({ show: false, type: null });
+    } catch (error) {
+      console.error("Error updating movement:", error);
+    }
   };
 
-  const deleteMovement = (id: string) => {
+  const deleteMovement = async (id: string) => {
     if (confirm('Sei sicuro di voler eliminare questo movimento?')) {
-      setMovements(prev => prev.filter(m => m.id !== id));
+      try {
+        await fetch(`/api/movements/${id}`, { method: 'DELETE' });
+        setMovements(prev => prev.filter(m => m.id !== id));
+      } catch (error) {
+        console.error("Error deleting movement:", error);
+      }
     }
   };
 
-  const addProductType = (name: string) => {
+  const addProductType = async (name: string) => {
     if (name && !productTypes.includes(name)) {
-      setProductTypes(prev => [...prev, name]);
+      try {
+        await fetch('/api/product_types', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        });
+        setProductTypes(prev => [...prev, name].sort());
+      } catch (error) {
+        console.error("Error adding product type:", error);
+      }
     }
   };
 
-  const removeProductType = (name: string) => {
-    setProductTypes(prev => prev.filter(t => t !== name));
+  const removeProductType = async (name: string) => {
+    try {
+      await fetch(`/api/product_types/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      setProductTypes(prev => prev.filter(t => t !== name));
+    } catch (error) {
+      console.error("Error removing product type:", error);
+    }
   };
 
-  const addUser = (u: Omit<User, 'id'>) => {
+  const addBrand = async (name: string) => {
+    if (name && !brands.includes(name)) {
+      try {
+        await fetch('/api/brands', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        });
+        setBrands(prev => [...prev, name].sort());
+      } catch (error) {
+        console.error("Error adding brand:", error);
+      }
+    }
+  };
+
+  const removeBrand = async (name: string) => {
+    try {
+      await fetch(`/api/brands/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      setBrands(prev => prev.filter(b => b !== name));
+    } catch (error) {
+      console.error("Error removing brand:", error);
+    }
+  };
+
+  const addUser = async (u: Omit<User, 'id'>) => {
     const nextId = users.length > 0 
       ? Math.max(...users.map(user => parseInt(user.id.split('-')[1]))) + 1 
       : 1;
     const newUser: User = { ...u, id: `U-${nextId}` };
-    setUsers(prev => [...prev, newUser]);
+    try {
+      await fetch('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newUser)
+      });
+      setUsers(prev => [...prev, newUser]);
+    } catch (error) {
+      console.error("Error adding user:", error);
+    }
   };
 
-  const deleteUser = (id: string) => {
+  const deleteUser = async (id: string) => {
     if (confirm('Sei sicuro di voler eliminare questo utente?')) {
-      setUsers(prev => prev.filter(u => u.id !== id));
+      try {
+        await fetch(`/api/users/${id}`, { method: 'DELETE' });
+        setUsers(prev => prev.filter(u => u.id !== id));
+      } catch (error) {
+        console.error("Error deleting user:", error);
+      }
     }
   };
 
@@ -186,11 +306,28 @@ export default function App() {
         "bg-white border-r border-gray-200 transition-all duration-300 flex flex-col",
         isSidebarOpen ? "w-64" : "w-20"
       )}>
-        <div className="p-6 flex items-center justify-between">
-          {isSidebarOpen && <h1 className="text-xl font-bold tracking-tight text-indigo-600">Magazzino IT</h1>}
-          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-gray-100 rounded-lg">
-            {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
-          </button>
+        <div className="p-6 flex flex-col gap-4">
+          <div className={cn(
+            "flex items-center justify-center bg-indigo-50 rounded-2xl transition-all duration-300",
+            isSidebarOpen ? "h-24 w-full" : "h-12 w-12"
+          )}>
+            {isSidebarOpen ? (
+              <div className="flex flex-col items-center gap-1">
+                <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white">
+                  <Package size={24} />
+                </div>
+                <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-widest">Your Logo Here</span>
+              </div>
+            ) : (
+              <Package size={20} className="text-indigo-600" />
+            )}
+          </div>
+          <div className="flex items-center justify-between">
+            {isSidebarOpen && <h1 className="text-xl font-bold tracking-tight text-indigo-600">Magazzino IT</h1>}
+            <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-gray-100 rounded-lg">
+              {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
+            </button>
+          </div>
         </div>
 
         <nav className="flex-1 px-4 space-y-2">
@@ -397,6 +534,9 @@ export default function App() {
               productTypes={productTypes} 
               onAddType={addProductType} 
               onRemoveType={removeProductType}
+              brands={brands}
+              onAddBrand={addBrand}
+              onRemoveBrand={removeBrand}
               movements={movements}
               onEdit={(m) => setShowMovementModal({ show: true, type: m.type, editId: m.id })}
               onDelete={deleteMovement}
@@ -412,6 +552,7 @@ export default function App() {
           onClose={() => setShowMovementModal({ show: false, type: null })}
           onSubmit={showMovementModal.editId ? (m) => updateMovement(showMovementModal.editId!, m) : addMovement}
           productTypes={productTypes}
+          brands={brands}
           users={users}
           initialData={showMovementModal.editId ? movements.find(m => m.id === showMovementModal.editId) : undefined}
         />
@@ -708,6 +849,76 @@ function ReportsView({ movements, users }: { movements: Movement[], users: User[
     movements.filter(m => m.type === 'Scarico' && m.assignee === selectedUser)
   , [movements, selectedUser]);
 
+  const totalAssets = useMemo(() => 
+    userItems.reduce((acc, item) => acc + item.quantity, 0)
+  , [userItems]);
+
+  const handlePrintReport = () => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Report Asset - ${selectedUser}</title>
+          <style>
+            body { font-family: sans-serif; padding: 40px; color: #333; }
+            .header { border-bottom: 2px solid #4f46e5; padding-bottom: 20px; margin-bottom: 30px; }
+            .title { font-size: 24px; font-weight: bold; color: #4f46e5; }
+            .meta { margin-bottom: 30px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+            .meta p { margin: 5px 0; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th, td { border: 1px solid #e5e7eb; padding: 12px; text-align: left; }
+            th { background-color: #f9fafb; color: #6b7280; font-size: 12px; text-transform: uppercase; }
+            .total-box { margin-top: 30px; padding: 20px; background-color: #f3f4f6; border-radius: 12px; text-align: right; }
+            .total-label { font-size: 14px; color: #6b7280; }
+            .total-value { font-size: 24px; font-weight: bold; color: #111827; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1 class="title">REPORT ASSET ASSEGNATI</h1>
+            <p>Magazzino IT - Riepilogo dotazioni dipendente</p>
+          </div>
+          <div class="meta">
+            <div>
+              <p><strong>Dipendente:</strong> ${selectedUser}</p>
+              <p><strong>Data Report:</strong> ${format(new Date(), 'dd/MM/yyyy')}</p>
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Prodotto</th>
+                <th>Marca</th>
+                <th>Quantità</th>
+                <th>Data Assegnazione</th>
+                <th>Stato</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${userItems.map(item => `
+                <tr>
+                  <td>${item.productName}</td>
+                  <td>${item.brand}</td>
+                  <td>${item.quantity}</td>
+                  <td>${item.date}</td>
+                  <td>In Uso</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          <div class="total-box">
+            <p class="total-label">Totale Asset Assegnati</p>
+            <p class="total-value">${totalAssets}</p>
+          </div>
+          <script>window.print(); window.close();</script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
   return (
     <motion.div 
       initial={{ opacity: 0, y: 10 }}
@@ -735,14 +946,28 @@ function ReportsView({ movements, users }: { movements: Movement[], users: User[
         {selectedUser && (
           <div className="space-y-4">
             <div className="flex justify-between items-center">
-              <h3 className="text-lg font-bold">Dispositivi assegnati a {selectedUser}</h3>
-              <button 
-                onClick={() => exportToCSV(userItems, `report_${selectedUser}`)}
-                className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl hover:bg-indigo-700 transition-colors shadow-sm"
-              >
-                <Download size={18} />
-                Scarica Report
-              </button>
+              <div className="flex items-center gap-4">
+                <h3 className="text-lg font-bold">Dispositivi assegnati a {selectedUser}</h3>
+                <span className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full text-xs font-bold">
+                  {totalAssets} Asset Totali
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => exportToCSV(userItems, `report_${selectedUser}`)}
+                  className="flex items-center gap-2 bg-white border border-gray-200 text-gray-700 px-4 py-2 rounded-xl hover:bg-gray-50 transition-colors shadow-sm"
+                >
+                  <Download size={18} />
+                  CSV
+                </button>
+                <button 
+                  onClick={handlePrintReport}
+                  className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl hover:bg-indigo-700 transition-colors shadow-sm"
+                >
+                  <Printer size={18} />
+                  Scarica PDF
+                </button>
+              </div>
             </div>
 
             <div className="border border-gray-100 rounded-xl overflow-hidden">
@@ -783,15 +1008,19 @@ function ReportsView({ movements, users }: { movements: Movement[], users: User[
   );
 }
 
-function AdminView({ productTypes, onAddType, onRemoveType, movements, onEdit, onDelete }: { 
+function AdminView({ productTypes, onAddType, onRemoveType, brands, onAddBrand, onRemoveBrand, movements, onEdit, onDelete }: { 
   productTypes: string[], 
   onAddType: (name: string) => void, 
   onRemoveType: (name: string) => void,
+  brands: string[],
+  onAddBrand: (name: string) => void,
+  onRemoveBrand: (name: string) => void,
   movements: Movement[],
   onEdit: (m: Movement) => void,
   onDelete: (id: string) => void
 }) {
   const [newType, setNewType] = useState('');
+  const [newBrand, setNewBrand] = useState('');
 
   return (
     <motion.div 
@@ -801,76 +1030,104 @@ function AdminView({ productTypes, onAddType, onRemoveType, movements, onEdit, o
     >
       <header>
         <h2 className="text-3xl font-bold tracking-tight">Amministrazione</h2>
-        <p className="text-gray-500">Gestisci i tipi di prodotto e correggi eventuali errori nei movimenti.</p>
+        <p className="text-gray-500">Gestisci i tipi di prodotto, le marche e correggi eventuali errori nei movimenti.</p>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-1 space-y-6">
-          <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
-            <h3 className="text-lg font-bold mb-4">Tipi di Prodotto</h3>
-            <div className="flex gap-2 mb-4">
-              <input 
-                type="text" 
-                placeholder="Nuovo tipo..." 
-                className="flex-1 bg-gray-50 border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500"
-                value={newType}
-                onChange={(e) => setNewType(e.target.value)}
-              />
-              <button 
-                onClick={() => { onAddType(newType); setNewType(''); }}
-                className="p-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700"
-              >
-                <Plus size={20} />
-              </button>
-            </div>
-            <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
-              {productTypes.map(t => (
-                <div key={t} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl group">
-                  <span className="font-medium text-sm">{t}</span>
-                  <button 
-                    onClick={() => onRemoveType(t)}
-                    className="p-1 text-red-500 opacity-0 group-hover:opacity-100 hover:bg-red-50 rounded-lg transition-all"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              ))}
-            </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+          <h3 className="text-lg font-bold mb-4">Tipi di Prodotto</h3>
+          <div className="flex gap-2 mb-4">
+            <input 
+              type="text" 
+              placeholder="Nuovo tipo..." 
+              className="flex-1 bg-gray-50 border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500"
+              value={newType}
+              onChange={(e) => setNewType(e.target.value)}
+            />
+            <button 
+              onClick={() => { onAddType(newType); setNewType(''); }}
+              className="p-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700"
+            >
+              <Plus size={20} />
+            </button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[300px] overflow-y-auto pr-2">
+            {productTypes.map(t => (
+              <div key={t} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl group">
+                <span className="font-medium text-sm truncate">{t}</span>
+                <button 
+                  onClick={() => onRemoveType(t)}
+                  className="p-1 text-red-500 opacity-0 group-hover:opacity-100 hover:bg-red-50 rounded-lg transition-all"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            ))}
           </div>
         </div>
 
-        <div className="lg:col-span-2">
-          <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
-            <h3 className="text-lg font-bold mb-4">Gestione Errori Movimenti</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-gray-50 border-bottom border-gray-100">
-                    <th className="px-4 py-3 text-xs font-bold uppercase text-gray-500">ID</th>
-                    <th className="px-4 py-3 text-xs font-bold uppercase text-gray-500">Prodotto</th>
-                    <th className="px-4 py-3 text-xs font-bold uppercase text-gray-500">Data</th>
-                    <th className="px-4 py-3 text-xs font-bold uppercase text-gray-500 text-right">Azioni</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {movements.slice(0, 10).map(m => (
-                    <tr key={m.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-4 py-3 text-xs font-mono text-gray-400">{m.id}</td>
-                      <td className="px-4 py-3 text-sm font-medium">{m.productName}</td>
-                      <td className="px-4 py-3 text-sm text-gray-500">{m.date}</td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex justify-end gap-2">
-                          <button onClick={() => onEdit(m)} className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg"><Edit2 size={14} /></button>
-                          <button onClick={() => onDelete(m.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={14} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <p className="text-xs text-gray-400 mt-4 italic">* Mostrati solo gli ultimi 10 movimenti. Usa la pagina Movimenti per la ricerca completa.</p>
-            </div>
+        <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+          <h3 className="text-lg font-bold mb-4">Marche</h3>
+          <div className="flex gap-2 mb-4">
+            <input 
+              type="text" 
+              placeholder="Nuova marca..." 
+              className="flex-1 bg-gray-50 border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500"
+              value={newBrand}
+              onChange={(e) => setNewBrand(e.target.value)}
+            />
+            <button 
+              onClick={() => { onAddBrand(newBrand); setNewBrand(''); }}
+              className="p-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700"
+            >
+              <Plus size={20} />
+            </button>
           </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[300px] overflow-y-auto pr-2">
+            {brands.map(b => (
+              <div key={b} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl group">
+                <span className="font-medium text-sm truncate">{b}</span>
+                <button 
+                  onClick={() => onRemoveBrand(b)}
+                  className="p-1 text-red-500 opacity-0 group-hover:opacity-100 hover:bg-red-50 rounded-lg transition-all"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+        <h3 className="text-lg font-bold mb-4">Gestione Errori Movimenti</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-gray-50 border-bottom border-gray-100">
+                <th className="px-4 py-3 text-xs font-bold uppercase text-gray-500">ID</th>
+                <th className="px-4 py-3 text-xs font-bold uppercase text-gray-500">Prodotto</th>
+                <th className="px-4 py-3 text-xs font-bold uppercase text-gray-500">Data</th>
+                <th className="px-4 py-3 text-xs font-bold uppercase text-gray-500 text-right">Azioni</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {movements.slice(0, 10).map(m => (
+                <tr key={m.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-4 py-3 text-xs font-mono text-gray-400">{m.id}</td>
+                  <td className="px-4 py-3 text-sm font-medium">{m.productName}</td>
+                  <td className="px-4 py-3 text-sm text-gray-500">{m.date}</td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex justify-end gap-2">
+                      <button onClick={() => onEdit(m)} className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg"><Edit2 size={14} /></button>
+                      <button onClick={() => onDelete(m.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={14} /></button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-xs text-gray-400 mt-4 italic">* Mostrati solo gli ultimi 10 movimenti. Usa la pagina Movimenti per la ricerca completa.</p>
         </div>
       </div>
     </motion.div>
@@ -1010,18 +1267,19 @@ function UsersView({ users, onAdd, onDelete }: { users: User[], onAdd: (u: Omit<
 
 // --- Modals ---
 
-function MovementModal({ type, onClose, onSubmit, productTypes, users, initialData }: { 
+function MovementModal({ type, onClose, onSubmit, productTypes, brands, users, initialData }: { 
   type: MovementType, 
   onClose: () => void, 
   onSubmit: (m: Omit<Movement, 'id'>) => void,
   productTypes: string[],
+  brands: string[],
   users: User[],
   initialData?: Movement
 }) {
   const [formData, setFormData] = useState<Omit<Movement, 'id'>>(initialData ? { ...initialData } : {
     type,
     productName: productTypes[0] || '',
-    brand: '',
+    brand: brands[0] || '',
     quantity: 1,
     isNew: true,
     date: format(new Date(), 'yyyy-MM-dd'),
@@ -1029,6 +1287,11 @@ function MovementModal({ type, onClose, onSubmit, productTypes, users, initialDa
     supplier: type === 'Carico' ? '' : undefined,
     assignee: type === 'Scarico' ? (users.length > 0 ? `${users[0].firstName} ${users[0].lastName}` : '') : undefined,
   });
+
+  const [isAddingNewType, setIsAddingNewType] = useState(false);
+  const [isAddingNewBrand, setIsAddingNewBrand] = useState(false);
+  const [newType, setNewType] = useState('');
+  const [newBrand, setNewBrand] = useState('');
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -1045,28 +1308,75 @@ function MovementModal({ type, onClose, onSubmit, productTypes, users, initialDa
           <button onClick={onClose} className="p-1 hover:bg-white/20 rounded-lg"><X size={24} /></button>
         </div>
 
-        <form className="p-8 space-y-6" onSubmit={(e) => { e.preventDefault(); onSubmit(formData); }}>
+        <form className="p-8 space-y-6" onSubmit={(e) => { 
+          e.preventDefault(); 
+          const finalData = { ...formData };
+          if (isAddingNewType && newType) finalData.productName = newType;
+          if (isAddingNewBrand && newBrand) finalData.brand = newBrand;
+          onSubmit(finalData); 
+        }}>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Tipo Prodotto</label>
-              <select 
-                className="w-full bg-gray-50 border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500"
-                value={formData.productName}
-                onChange={(e) => setFormData({ ...formData, productName: e.target.value })}
-                required
-              >
-                {productTypes.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
+              <div className="flex justify-between items-center">
+                <label className="text-sm font-medium text-gray-700">Tipo Prodotto</label>
+                <button 
+                  type="button" 
+                  onClick={() => setIsAddingNewType(!isAddingNewType)}
+                  className="text-[10px] text-indigo-600 hover:underline"
+                >
+                  {isAddingNewType ? 'Seleziona esistente' : '+ Aggiungi nuovo'}
+                </button>
+              </div>
+              {isAddingNewType ? (
+                <input 
+                  type="text" 
+                  placeholder="Inserisci nuovo tipo..."
+                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500"
+                  value={newType}
+                  onChange={(e) => setNewType(e.target.value)}
+                  required
+                />
+              ) : (
+                <select 
+                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500"
+                  value={formData.productName}
+                  onChange={(e) => setFormData({ ...formData, productName: e.target.value })}
+                  required
+                >
+                  {productTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              )}
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Marca</label>
-              <input 
-                type="text" 
-                className="w-full bg-gray-50 border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500"
-                value={formData.brand}
-                onChange={(e) => setFormData({ ...formData, brand: e.target.value })}
-                required
-              />
+              <div className="flex justify-between items-center">
+                <label className="text-sm font-medium text-gray-700">Marca</label>
+                <button 
+                  type="button" 
+                  onClick={() => setIsAddingNewBrand(!isAddingNewBrand)}
+                  className="text-[10px] text-indigo-600 hover:underline"
+                >
+                  {isAddingNewBrand ? 'Seleziona esistente' : '+ Aggiungi nuova'}
+                </button>
+              </div>
+              {isAddingNewBrand ? (
+                <input 
+                  type="text" 
+                  placeholder="Inserisci nuova marca..."
+                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500"
+                  value={newBrand}
+                  onChange={(e) => setNewBrand(e.target.value)}
+                  required
+                />
+              ) : (
+                <select 
+                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500"
+                  value={formData.brand}
+                  onChange={(e) => setFormData({ ...formData, brand: e.target.value })}
+                  required
+                >
+                  {brands.map(b => <option key={b} value={b}>{b}</option>)}
+                </select>
+              )}
             </div>
           </div>
 
