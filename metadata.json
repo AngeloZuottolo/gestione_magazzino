@@ -1,0 +1,5 @@
+{
+  "name": "IT Warehouse Manager",
+  "description": "A professional IT inventory management system for tracking devices, inbound/outbound movements, and generating assignment documents.",
+  "requestFramePermissions": []
+}
