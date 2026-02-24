@@ -38,13 +38,35 @@ db.exec(`
     supplier TEXT,
     assignee TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS auth_users (
+    username TEXT PRIMARY KEY,
+    password TEXT
+  );
 `);
+
+// Seed admin user
+const adminExists = db.prepare("SELECT * FROM auth_users WHERE username = 'admin'").get();
+if (!adminExists) {
+  db.prepare("INSERT INTO auth_users (username, password) VALUES (?, ?)").run('admin', 'admin1232');
+}
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.use(express.json());
+
+  // Auth Route
+  app.post("/api/login", (req, res) => {
+    const { username, password } = req.body;
+    const user = db.prepare("SELECT * FROM auth_users WHERE username = ? AND password = ?").get(username, password);
+    if (user) {
+      res.json({ success: true, username: user.username });
+    } else {
+      res.status(401).json({ error: "Credenziali non valide" });
+    }
+  });
 
   // API Routes
   app.get("/api/product_types", (req, res) => {
