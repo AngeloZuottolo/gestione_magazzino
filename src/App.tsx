@@ -33,6 +33,7 @@ import { twMerge } from 'tailwind-merge';
 
 import { Movement, InventoryItem, MovementType, User } from './types';
 import { STORAGE_KEYS, INITIAL_PRODUCT_TYPES, INITIAL_BRANDS, INITIAL_LOCATIONS, exportToCSV } from './constants';
+import { Analytics } from '@vercel/analytics/react';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -581,6 +582,7 @@ export default function App() {
           onClose={() => setShowAssignmentDoc(null)} 
         />
       )}
+      <Analytics />
     </div>
   );
 }
