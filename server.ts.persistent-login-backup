@@ -1,3 +1,4 @@
+// Backup of server.ts with login and external DB
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
@@ -47,7 +48,18 @@ async function initDb() {
         supplier TEXT,
         assignee TEXT
       );
+
+      CREATE TABLE IF NOT EXISTS auth_users (
+        username TEXT PRIMARY KEY,
+        password TEXT
+      );
     `);
+
+    // Seed admin user
+    const adminCheck = await client.query("SELECT * FROM auth_users WHERE username = 'admin'");
+    if (adminCheck.rows.length === 0) {
+      await client.query("INSERT INTO auth_users (username, password) VALUES ($1, $2)", ['admin', 'admin1232']);
+    }
   } catch (err) {
     console.error("Error initializing database:", err);
   } finally {
@@ -57,6 +69,21 @@ async function initDb() {
 
 const app = express();
 app.use(express.json());
+
+// Auth Route
+app.post("/api/login", async (req, res) => {
+  const { username, password } = req.body;
+  try {
+    const result = await pool.query("SELECT * FROM auth_users WHERE username = $1 AND password = $2", [username, password]);
+    if (result.rows.length > 0) {
+      res.json({ success: true, username: result.rows[0].username });
+    } else {
+      res.status(401).json({ error: "Credenziali non valide" });
+    }
+  } catch (err) {
+    res.status(500).json({ error: "Database error" });
+  }
+});
 
 // API Routes
 app.get("/api/product_types", async (req, res) => {

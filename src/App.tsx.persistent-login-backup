@@ -1,0 +1,615 @@
+// Backup of App.tsx with login and external DB
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  LayoutDashboard, 
+  Package, 
+  ArrowUpRight, 
+  ArrowDownLeft, 
+  History, 
+  Settings, 
+  FileText,
+  Users,
+  Plus,
+  Search,
+  Filter,
+  Download,
+  Trash2,
+  Edit2,
+  Printer,
+  ChevronRight,
+  Menu,
+  X,
+  LogOut,
+  Lock
+} from 'lucide-react';
+import { format } from 'date-fns';
+import { motion, AnimatePresence } from 'motion/react';
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+import { Movement, InventoryItem, MovementType, User } from './types';
+import { STORAGE_KEYS, INITIAL_PRODUCT_TYPES, INITIAL_BRANDS, INITIAL_LOCATIONS, exportToCSV } from './constants';
+
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
+export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'inventory' | 'movements' | 'reports' | 'admin' | 'users'>('dashboard');
+  const [movements, setMovements] = useState<Movement[]>([]);
+  const [productTypes, setProductTypes] = useState<string[]>([]);
+  const [brands, setBrands] = useState<string[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+
+  // Form states
+  const [showMovementModal, setShowMovementModal] = useState<{ show: boolean; type: MovementType | null; editId?: string }>({ show: false, type: null });
+  const [showAssignmentDoc, setShowAssignmentDoc] = useState<{ show: boolean; assignee: string; date: string; items: Movement[] } | null>(null);
+
+  // Load data
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [movRes, typeRes, brandRes, userRes] = await Promise.all([
+          fetch('/api/movements'),
+          fetch('/api/product_types'),
+          fetch('/api/brands'),
+          fetch('/api/users')
+        ]);
+
+        const [movData, typeData, brandData, userData] = await Promise.all([
+          movRes.json(),
+          typeRes.json(),
+          brandRes.json(),
+          userRes.json()
+        ]);
+
+        setMovements(movData);
+        
+        if (typeData.length > 0) {
+          setProductTypes(typeData);
+        } else {
+          // Initialize with defaults if empty
+          for (const type of INITIAL_PRODUCT_TYPES) {
+            await fetch('/api/product_types', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: type })
+            });
+          }
+          setProductTypes(INITIAL_PRODUCT_TYPES);
+        }
+
+        if (brandData.length > 0) {
+          setBrands(brandData);
+        } else {
+          for (const brand of INITIAL_BRANDS) {
+            await fetch('/api/brands', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: brand })
+            });
+          }
+          setBrands(INITIAL_BRANDS);
+        }
+
+        if (userData.length > 0) {
+          setUsers(userData);
+        } else {
+          const initialUsers: User[] = [
+            { id: 'U-1', firstName: 'Mario', lastName: 'Rossi', location: 'Milano' },
+            { id: 'U-2', firstName: 'Giulia', lastName: 'Bianchi', location: 'Roma' },
+          ];
+          for (const user of initialUsers) {
+            await fetch('/api/users', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(user)
+            });
+          }
+          setUsers(initialUsers);
+        }
+      } catch (error) {
+        console.error("Error fetching data:", error);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  // Derived State: Inventory
+  const inventory = useMemo(() => {
+    const items: Record<string, InventoryItem> = {};
+
+    movements.forEach(m => {
+      const key = `${m.productName}-${m.brand}`;
+      if (!items[key]) {
+        items[key] = {
+          productName: m.productName,
+          brand: m.brand,
+          total: 0,
+          newCount: 0,
+          usedCount: 0
+        };
+      }
+
+      const qty = m.type === 'Carico' ? m.quantity : -m.quantity;
+      items[key].total += qty;
+      
+      if (m.isNew) {
+        items[key].newCount += qty;
+      } else {
+        items[key].usedCount += qty;
+      }
+    });
+
+    return Object.values(items).filter(item => item.total !== 0);
+  }, [movements]);
+
+  const addMovement = async (m: Omit<Movement, 'id'>) => {
+    const prefix = m.type === 'Carico' ? 'C' : 'S';
+    const typeMovements = movements.filter(mov => mov.type === m.type);
+    const nextId = typeMovements.length > 0 
+      ? Math.max(...typeMovements.map(mov => parseInt(mov.id.split('-')[1]))) + 1 
+      : 1;
+    
+    const newMovement: Movement = {
+      ...m,
+      id: `${prefix}-${nextId}`
+    };
+
+    try {
+      await fetch('/api/movements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newMovement)
+      });
+
+      // Auto-populate lists if new values are provided
+      if (m.productName && !productTypes.includes(m.productName)) {
+        await fetch('/api/product_types', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: m.productName })
+        });
+        setProductTypes(prev => [...prev, m.productName]);
+      }
+      if (m.brand && !brands.includes(m.brand)) {
+        await fetch('/api/brands', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: m.brand })
+        });
+        setBrands(prev => [...prev, m.brand]);
+      }
+
+      setMovements(prev => [newMovement, ...prev]);
+      setShowMovementModal({ show: false, type: null });
+    } catch (error) {
+      console.error("Error adding movement:", error);
+    }
+  };
+
+  const updateMovement = async (id: string, updated: Partial<Movement>) => {
+    const existing = movements.find(m => m.id === id);
+    if (!existing) return;
+    const fullMovement = { ...existing, ...updated };
+
+    try {
+      await fetch(`/api/movements/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fullMovement)
+      });
+      setMovements(prev => prev.map(m => m.id === id ? fullMovement : m));
+      setShowMovementModal({ show: false, type: null });
+    } catch (error) {
+      console.error("Error updating movement:", error);
+    }
+  };
+
+  const deleteMovement = async (id: string) => {
+    if (confirm('Sei sicuro di voler eliminare questo movimento?')) {
+      try {
+        await fetch(`/api/movements/${id}`, { method: 'DELETE' });
+        setMovements(prev => prev.filter(m => m.id !== id));
+      } catch (error) {
+        console.error("Error deleting movement:", error);
+      }
+    }
+  };
+
+  const addProductType = async (name: string) => {
+    if (name && !productTypes.includes(name)) {
+      try {
+        await fetch('/api/product_types', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        });
+        setProductTypes(prev => [...prev, name].sort());
+      } catch (error) {
+        console.error("Error adding product type:", error);
+      }
+    }
+  };
+
+  const removeProductType = async (name: string) => {
+    try {
+      await fetch(`/api/product_types/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      setProductTypes(prev => prev.filter(t => t !== name));
+    } catch (error) {
+      console.error("Error removing product type:", error);
+    }
+  };
+
+  const addBrand = async (name: string) => {
+    if (name && !brands.includes(name)) {
+      try {
+        await fetch('/api/brands', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        });
+        setBrands(prev => [...prev, name].sort());
+      } catch (error) {
+        console.error("Error adding brand:", error);
+      }
+    }
+  };
+
+  const removeBrand = async (name: string) => {
+    try {
+      await fetch(`/api/brands/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      setBrands(prev => prev.filter(b => b !== name));
+    } catch (error) {
+      console.error("Error removing brand:", error);
+    }
+  };
+
+  const addUser = async (u: Omit<User, 'id'>) => {
+    const nextId = users.length > 0 
+      ? Math.max(...users.map(user => parseInt(user.id.split('-')[1]))) + 1 
+      : 1;
+    const newUser: User = { ...u, id: `U-${nextId}` };
+    try {
+      await fetch('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newUser)
+      });
+      setUsers(prev => [...prev, newUser]);
+    } catch (error) {
+      console.error("Error adding user:", error);
+    }
+  };
+
+  const deleteUser = async (id: string) => {
+    if (confirm('Sei sicuro di voler eliminare questo utente?')) {
+      try {
+        await fetch(`/api/users/${id}`, { method: 'DELETE' });
+        setUsers(prev => prev.filter(u => u.id !== id));
+      } catch (error) {
+        console.error("Error deleting user:", error);
+      }
+    }
+  };
+
+  if (!isAuthenticated) {
+    return <LoginView onLogin={() => setIsAuthenticated(true)} />;
+  }
+
+  return (
+    <div className="flex h-screen bg-[#F8F9FA] text-[#1A1A1A] font-sans overflow-hidden">
+      {/* Sidebar */}
+      <aside className={cn(
+        "bg-white border-r border-gray-200 transition-all duration-300 flex flex-col",
+        isSidebarOpen ? "w-64" : "w-20"
+      )}>
+        <div className="p-6 flex flex-col gap-4">
+          <div className={cn(
+            "flex items-center justify-center bg-indigo-50 rounded-2xl transition-all duration-300",
+            isSidebarOpen ? "h-24 w-full" : "h-12 w-12"
+          )}>
+            {isSidebarOpen ? (
+              <div className="flex flex-col items-center gap-1">
+                <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white">
+                  <Package size={24} />
+                </div>
+                <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-widest">Your Logo Here</span>
+              </div>
+            ) : (
+              <Package size={20} className="text-indigo-600" />
+            )}
+          </div>
+          <div className="flex items-center justify-between">
+            {isSidebarOpen && <h1 className="text-xl font-bold tracking-tight text-indigo-600">Magazzino IT</h1>}
+            <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-gray-100 rounded-lg">
+              {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
+            </button>
+          </div>
+        </div>
+
+        <nav className="flex-1 px-4 space-y-2">
+          <NavItem 
+            icon={<LayoutDashboard size={20} />} 
+            label="Dashboard" 
+            active={activeTab === 'dashboard'} 
+            onClick={() => setActiveTab('dashboard')} 
+            collapsed={!isSidebarOpen}
+          />
+          <NavItem 
+            icon={<Package size={20} />} 
+            label="Magazzino" 
+            active={activeTab === 'inventory'} 
+            onClick={() => setActiveTab('inventory')} 
+            collapsed={!isSidebarOpen}
+          />
+          <NavItem 
+            icon={<History size={20} />} 
+            label="Movimenti" 
+            active={activeTab === 'movements'} 
+            onClick={() => setActiveTab('movements')} 
+            collapsed={!isSidebarOpen}
+          />
+          <NavItem 
+            icon={<FileText size={20} />} 
+            label="Report Utenti" 
+            active={activeTab === 'reports'} 
+            onClick={() => setActiveTab('reports')} 
+            collapsed={!isSidebarOpen}
+          />
+          <NavItem 
+            icon={<Users size={20} />} 
+            label="Database Utenti" 
+            active={activeTab === 'users'} 
+            onClick={() => setActiveTab('users')} 
+            collapsed={!isSidebarOpen}
+          />
+          <NavItem 
+            icon={<Settings size={20} />} 
+            label="Amministrazione" 
+            active={activeTab === 'admin'} 
+            onClick={() => setActiveTab('admin')} 
+            collapsed={!isSidebarOpen}
+          />
+        </nav>
+
+        <div className="p-4 border-t border-gray-100 space-y-4">
+          <div className={cn("flex items-center gap-3", !isSidebarOpen && "justify-center")}>
+            <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-xs">
+              AD
+            </div>
+            {isSidebarOpen && (
+              <div>
+                <p className="text-sm font-medium">Admin User</p>
+                <p className="text-xs text-gray-500">IT Department</p>
+              </div>
+            )}
+          </div>
+          <button 
+            onClick={() => setIsAuthenticated(false)}
+            className={cn(
+              "w-full flex items-center gap-3 p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors",
+              !isSidebarOpen && "justify-center"
+            )}
+          >
+            <LogOut size={20} />
+            {isSidebarOpen && <span className="text-sm font-medium">Logout</span>}
+          </button>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <main className="flex-1 overflow-y-auto p-8">
+        <AnimatePresence mode="wait">
+          {activeTab === 'dashboard' && (
+            <motion.div 
+              key="dashboard"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-8"
+            >
+              <header className="flex justify-between items-end">
+                <div>
+                  <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
+                  <p className="text-gray-500">Panoramica dello stato attuale del magazzino.</p>
+                </div>
+                <div className="flex gap-3">
+                  <button 
+                    onClick={() => setShowMovementModal({ show: true, type: 'Carico' })}
+                    className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
+                  >
+                    <ArrowUpRight size={18} />
+                    Nuovo Carico
+                  </button>
+                  <button 
+                    onClick={() => setShowMovementModal({ show: true, type: 'Scarico' })}
+                    className="flex items-center gap-2 bg-white border border-gray-200 px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors shadow-sm"
+                  >
+                    <ArrowDownLeft size={18} />
+                    Nuovo Scarico
+                  </button>
+                </div>
+              </header>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <StatCard 
+                  title="Totale Dispositivi" 
+                  value={inventory.reduce((acc, curr) => acc + curr.total, 0)} 
+                  icon={<Package className="text-indigo-600" />}
+                  trend="+12% vs mese scorso"
+                />
+                <StatCard 
+                  title="Nuovi" 
+                  value={inventory.reduce((acc, curr) => acc + curr.newCount, 0)} 
+                  icon={<ArrowUpRight className="text-emerald-600" />}
+                  trend="In stock"
+                />
+                <StatCard 
+                  title="Usati" 
+                  value={inventory.reduce((acc, curr) => acc + curr.usedCount, 0)} 
+                  icon={<History className="text-amber-600" />}
+                  trend="Disponibili"
+                />
+                <StatCard 
+                  title="Movimenti Oggi" 
+                  value={movements.filter(m => m.date === format(new Date(), 'yyyy-MM-dd')).length} 
+                  icon={<History className="text-blue-600" />}
+                  trend="Ultime 24h"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+                  <h3 className="text-lg font-bold mb-4">Ultimi Movimenti</h3>
+                  <div className="space-y-4">
+                    {movements.slice(0, 5).map(m => (
+                      <div key={m.id} className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-xl transition-colors">
+                        <div className="flex items-center gap-4">
+                          <div className={cn(
+                            "w-10 h-10 rounded-full flex items-center justify-center",
+                            m.type === 'Carico' ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"
+                          )}>
+                            {m.type === 'Carico' ? <ArrowUpRight size={20} /> : <ArrowDownLeft size={20} />}
+                          </div>
+                          <div>
+                            <p className="font-medium">{m.productName} - {m.brand}</p>
+                            <p className="text-xs text-gray-500">{m.type} • {m.date}</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className={cn("font-bold", m.type === 'Carico' ? "text-emerald-600" : "text-amber-600")}>
+                            {m.type === 'Carico' ? '+' : '-'}{m.quantity}
+                          </p>
+                          <p className="text-xs text-gray-400">{m.id}</p>
+                        </div>
+                      </div>
+                    ))}
+                    {movements.length === 0 && <p className="text-center text-gray-400 py-8">Nessun movimento registrato.</p>}
+                  </div>
+                </div>
+
+                <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+                  <h3 className="text-lg font-bold mb-4">Disponibilità Critica</h3>
+                  <div className="space-y-4">
+                    {inventory.filter(i => i.total < 5).slice(0, 5).map(i => (
+                      <div key={`${i.productName}-${i.brand}`} className="flex items-center justify-between p-3">
+                        <div className="flex items-center gap-4">
+                          <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center">
+                            <Package size={20} />
+                          </div>
+                          <div>
+                            <p className="font-medium">{i.productName}</p>
+                            <p className="text-xs text-gray-500">{i.brand}</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-bold text-red-600">{i.total}</p>
+                          <p className="text-xs text-gray-400">Rimanenti</p>
+                        </div>
+                      </div>
+                    ))}
+                    {inventory.filter(i => i.total < 5).length === 0 && <p className="text-center text-gray-400 py-8">Tutte le scorte sono ottimali.</p>}
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'inventory' && (
+            <InventoryView inventory={inventory} />
+          )}
+
+          {activeTab === 'movements' && (
+            <MovementsView 
+              movements={movements} 
+              onDelete={deleteMovement} 
+              onEdit={(m) => setShowMovementModal({ show: true, type: m.type, editId: m.id })}
+              onPrintAssignment={(assignee, date, items) => setShowAssignmentDoc({ show: true, assignee, date, items })}
+            />
+          )}
+
+          {activeTab === 'reports' && (
+            <ReportsView movements={movements} users={users} />
+          )}
+
+          {activeTab === 'users' && (
+            <UsersView users={users} onAdd={addUser} onDelete={deleteUser} />
+          )}
+
+          {activeTab === 'admin' && (
+            <AdminView 
+              productTypes={productTypes} 
+              onAddType={addProductType} 
+              onRemoveType={removeProductType}
+              brands={brands}
+              onAddBrand={addBrand}
+              onRemoveBrand={removeBrand}
+              movements={movements}
+              onEdit={(m) => setShowMovementModal({ show: true, type: m.type, editId: m.id })}
+              onDelete={deleteMovement}
+            />
+          )}
+        </AnimatePresence>
+      </main>
+
+      {/* Modals */}
+      {showMovementModal.show && (
+        <MovementModal 
+          type={showMovementModal.type!} 
+          onClose={() => setShowMovementModal({ show: false, type: null })}
+          onSubmit={showMovementModal.editId ? (m) => updateMovement(showMovementModal.editId!, m) : addMovement}
+          productTypes={productTypes}
+          brands={brands}
+          users={users}
+          initialData={showMovementModal.editId ? movements.find(m => m.id === showMovementModal.editId) : undefined}
+        />
+      )}
+
+      {showAssignmentDoc && (
+        <AssignmentModal 
+          {...showAssignmentDoc} 
+          onClose={() => setShowAssignmentDoc(null)} 
+        />
+      )}
+    </div>
+  );
+}
+
+// --- Sub-Components ---
+
+function NavItem({ icon, label, active, onClick, collapsed }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void, collapsed: boolean }) {
+  return (
+    <button 
+      onClick={onClick}
+      className={cn(
+        "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group",
+        active 
+          ? "bg-indigo-50 text-indigo-600 shadow-sm" 
+          : "text-gray-500 hover:bg-gray-50 hover:text-gray-900"
+      )}
+    >
+      <span className={cn("transition-transform duration-200", active && "scale-110")}>{icon}</span>
+      {!collapsed && <span className="font-medium text-sm">{label}</span>}
+      {!collapsed && active && <ChevronRight size={16} className="ml-auto" />}
+    </button>
+  );
+}
+
+function StatCard({ title, value, icon, trend }: { title: string, value: number, icon: React.ReactNode, trend: string }) {
+  return (
+    <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+      <div className="flex justify-between items-start mb-4">
+        <div className="p-2 bg-gray-50 rounded-lg">{icon}</div>
+        <span className="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full">{trend}</span>
+      </div>
+      <h4 className="text-sm text-gray-500 mb-1">{title}</h4>
+      <p className="text-2xl font-bold tracking-tight">{value}</p>
+    </div>
+  );
+}
+
+// ... (Rest of the views and components)

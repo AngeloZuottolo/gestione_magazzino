@@ -39,7 +39,6 @@ function cn(...inputs: ClassValue[]) {
 }
 
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'inventory' | 'movements' | 'reports' | 'admin' | 'users'>('dashboard');
   const [movements, setMovements] = useState<Movement[]>([]);
   const [productTypes, setProductTypes] = useState<string[]>([]);
@@ -302,10 +301,6 @@ export default function App() {
     }
   };
 
-  if (!isAuthenticated) {
-    return <LoginView onLogin={() => setIsAuthenticated(true)} />;
-  }
-
   return (
     <div className="flex h-screen bg-[#F8F9FA] text-[#1A1A1A] font-sans overflow-hidden">
       {/* Sidebar */}
@@ -382,7 +377,7 @@ export default function App() {
           />
         </nav>
 
-        <div className="p-4 border-t border-gray-100 space-y-4">
+        <div className="p-4 border-t border-gray-100">
           <div className={cn("flex items-center gap-3", !isSidebarOpen && "justify-center")}>
             <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-xs">
               AD
@@ -394,16 +389,6 @@ export default function App() {
               </div>
             )}
           </div>
-          <button 
-            onClick={() => setIsAuthenticated(false)}
-            className={cn(
-              "w-full flex items-center gap-3 p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors",
-              !isSidebarOpen && "justify-center"
-            )}
-          >
-            <LogOut size={20} />
-            {isSidebarOpen && <span className="text-sm font-medium">Logout</span>}
-          </button>
         </div>
       </aside>
 
@@ -1622,102 +1607,6 @@ function AssignmentModal({ assignee, date, items, onClose }: { assignee: string,
             <Printer size={20} />
             Stampa Documento
           </button>
-        </div>
-      </motion.div>
-    </div>
-  );
-}
-
-function LoginView({ onLogin }: { onLogin: () => void }) {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setIsLoading(true);
-
-    try {
-      const response = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      });
-
-      const data = await response.json();
-
-      if (response.ok && data.success) {
-        onLogin();
-      } else {
-        setError(data.error || 'Credenziali non valide');
-      }
-    } catch (err) {
-      setError('Errore di connessione al server');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-indigo-600 flex items-center justify-center p-4">
-      <motion.div 
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="bg-white w-full max-w-md rounded-3xl shadow-2xl p-8 space-y-8"
-      >
-        <div className="text-center space-y-2">
-          <div className="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <Lock size={32} />
-          </div>
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900">Magazzino IT</h1>
-          <p className="text-gray-500">Accedi per gestire l'inventario</p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {error && (
-            <div className="bg-red-50 text-red-600 p-4 rounded-xl text-sm font-medium border border-red-100">
-              {error}
-            </div>
-          )}
-
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Nome Utente</label>
-              <input 
-                type="text" 
-                required
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500"
-                placeholder="admin"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-              <input 
-                type="password" 
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500"
-                placeholder="••••••••"
-              />
-            </div>
-          </div>
-
-          <button 
-            type="submit"
-            disabled={isLoading}
-            className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isLoading ? 'Accesso in corso...' : 'Accedi'}
-          </button>
-        </form>
-
-        <div className="text-center">
-          <p className="text-xs text-gray-400 uppercase tracking-widest font-bold">Sistema Gestione Asset</p>
         </div>
       </motion.div>
     </div>
