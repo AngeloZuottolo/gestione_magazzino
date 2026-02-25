@@ -43,6 +43,7 @@ export default function App() {
   const [movements, setMovements] = useState<Movement[]>([]);
   const [productTypes, setProductTypes] = useState<string[]>([]);
   const [brands, setBrands] = useState<string[]>([]);
+  const [suppliers, setSuppliers] = useState<string[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
@@ -54,21 +55,24 @@ export default function App() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [movRes, typeRes, brandRes, userRes] = await Promise.all([
+        const [movRes, typeRes, brandRes, supplierRes, userRes] = await Promise.all([
           fetch('/api/movements'),
           fetch('/api/product_types'),
           fetch('/api/brands'),
+          fetch('/api/suppliers'),
           fetch('/api/users')
         ]);
 
-        const [movData, typeData, brandData, userData] = await Promise.all([
+        const [movData, typeData, brandData, supplierData, userData] = await Promise.all([
           movRes.json(),
           typeRes.json(),
           brandRes.json(),
+          supplierRes.json(),
           userRes.json()
         ]);
 
         setMovements(movData);
+        setSuppliers(supplierData);
         
         if (typeData.length > 0) {
           setProductTypes(typeData);
@@ -188,6 +192,14 @@ export default function App() {
         });
         setBrands(prev => [...prev, m.brand]);
       }
+      if (m.supplier && !suppliers.includes(m.supplier)) {
+        await fetch('/api/suppliers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: m.supplier })
+        });
+        setSuppliers(prev => [...prev, m.supplier]);
+      }
 
       setMovements(prev => [newMovement, ...prev]);
       setShowMovementModal({ show: false, type: null });
@@ -270,6 +282,30 @@ export default function App() {
       setBrands(prev => prev.filter(b => b !== name));
     } catch (error) {
       console.error("Error removing brand:", error);
+    }
+  };
+
+  const addSupplier = async (name: string) => {
+    if (name && !suppliers.includes(name)) {
+      try {
+        await fetch('/api/suppliers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        });
+        setSuppliers(prev => [...prev, name].sort());
+      } catch (error) {
+        console.error("Error adding supplier:", error);
+      }
+    }
+  };
+
+  const removeSupplier = async (name: string) => {
+    try {
+      await fetch(`/api/suppliers/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      setSuppliers(prev => prev.filter(s => s !== name));
+    } catch (error) {
+      console.error("Error removing supplier:", error);
     }
   };
 
@@ -539,6 +575,9 @@ export default function App() {
               brands={brands}
               onAddBrand={addBrand}
               onRemoveBrand={removeBrand}
+              suppliers={suppliers}
+              onAddSupplier={addSupplier}
+              onRemoveSupplier={removeSupplier}
               movements={movements}
               onEdit={(m) => setShowMovementModal({ show: true, type: m.type, editId: m.id })}
               onDelete={deleteMovement}
@@ -555,6 +594,7 @@ export default function App() {
           onSubmit={showMovementModal.editId ? (m) => updateMovement(showMovementModal.editId!, m) : addMovement}
           productTypes={productTypes}
           brands={brands}
+          suppliers={suppliers}
           users={users}
           initialData={showMovementModal.editId ? movements.find(m => m.id === showMovementModal.editId) : undefined}
         />
@@ -1010,19 +1050,23 @@ function ReportsView({ movements, users }: { movements: Movement[], users: User[
   );
 }
 
-function AdminView({ productTypes, onAddType, onRemoveType, brands, onAddBrand, onRemoveBrand, movements, onEdit, onDelete }: { 
+function AdminView({ productTypes, onAddType, onRemoveType, brands, onAddBrand, onRemoveBrand, suppliers, onAddSupplier, onRemoveSupplier, movements, onEdit, onDelete }: { 
   productTypes: string[], 
   onAddType: (name: string) => void, 
   onRemoveType: (name: string) => void,
   brands: string[],
   onAddBrand: (name: string) => void,
   onRemoveBrand: (name: string) => void,
+  suppliers: string[],
+  onAddSupplier: (name: string) => void,
+  onRemoveSupplier: (name: string) => void,
   movements: Movement[],
   onEdit: (m: Movement) => void,
   onDelete: (id: string) => void
 }) {
   const [newType, setNewType] = useState('');
   const [newBrand, setNewBrand] = useState('');
+  const [newSupplier, setNewSupplier] = useState('');
 
   return (
     <motion.div 
@@ -1032,16 +1076,16 @@ function AdminView({ productTypes, onAddType, onRemoveType, brands, onAddBrand, 
     >
       <header>
         <h2 className="text-3xl font-bold tracking-tight">Amministrazione</h2>
-        <p className="text-gray-500">Gestisci i tipi di prodotto, le marche e correggi eventuali errori nei movimenti.</p>
+        <p className="text-gray-500">Gestisci i prodotti, le marche, i fornitori e correggi eventuali errori nei movimenti.</p>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
-          <h3 className="text-lg font-bold mb-4">Tipi di Prodotto</h3>
+          <h3 className="text-lg font-bold mb-4">Prodotti</h3>
           <div className="flex gap-2 mb-4">
             <input 
               type="text" 
-              placeholder="Nuovo tipo..." 
+              placeholder="Nuovo prodotto..." 
               className="flex-1 bg-gray-50 border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500"
               value={newType}
               onChange={(e) => setNewType(e.target.value)}
@@ -1053,7 +1097,7 @@ function AdminView({ productTypes, onAddType, onRemoveType, brands, onAddBrand, 
               <Plus size={20} />
             </button>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[300px] overflow-y-auto pr-2">
+          <div className="grid grid-cols-1 gap-2 max-h-[300px] overflow-y-auto pr-2">
             {productTypes.map(t => (
               <div key={t} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl group">
                 <span className="font-medium text-sm truncate">{t}</span>
@@ -1085,12 +1129,44 @@ function AdminView({ productTypes, onAddType, onRemoveType, brands, onAddBrand, 
               <Plus size={20} />
             </button>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[300px] overflow-y-auto pr-2">
+          <div className="grid grid-cols-1 gap-2 max-h-[300px] overflow-y-auto pr-2">
             {brands.map(b => (
               <div key={b} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl group">
                 <span className="font-medium text-sm truncate">{b}</span>
                 <button 
                   onClick={() => onRemoveBrand(b)}
+                  className="p-1 text-red-500 opacity-0 group-hover:opacity-100 hover:bg-red-50 rounded-lg transition-all"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+          <h3 className="text-lg font-bold mb-4">Fornitori</h3>
+          <div className="flex gap-2 mb-4">
+            <input 
+              type="text" 
+              placeholder="Nuovo fornitore..." 
+              className="flex-1 bg-gray-50 border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500"
+              value={newSupplier}
+              onChange={(e) => setNewSupplier(e.target.value)}
+            />
+            <button 
+              onClick={() => { onAddSupplier(newSupplier); setNewSupplier(''); }}
+              className="p-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700"
+            >
+              <Plus size={20} />
+            </button>
+          </div>
+          <div className="grid grid-cols-1 gap-2 max-h-[300px] overflow-y-auto pr-2">
+            {suppliers.map(s => (
+              <div key={s} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl group">
+                <span className="font-medium text-sm truncate">{s}</span>
+                <button 
+                  onClick={() => onRemoveSupplier(s)}
                   className="p-1 text-red-500 opacity-0 group-hover:opacity-100 hover:bg-red-50 rounded-lg transition-all"
                 >
                   <Trash2 size={16} />
@@ -1269,12 +1345,13 @@ function UsersView({ users, onAdd, onDelete }: { users: User[], onAdd: (u: Omit<
 
 // --- Modals ---
 
-function MovementModal({ type, onClose, onSubmit, productTypes, brands, users, initialData }: { 
+function MovementModal({ type, onClose, onSubmit, productTypes, brands, suppliers, users, initialData }: { 
   type: MovementType, 
   onClose: () => void, 
   onSubmit: (m: Omit<Movement, 'id'>) => void,
   productTypes: string[],
   brands: string[],
+  suppliers: string[],
   users: User[],
   initialData?: Movement
 }) {
@@ -1286,14 +1363,16 @@ function MovementModal({ type, onClose, onSubmit, productTypes, brands, users, i
     isNew: true,
     date: format(new Date(), 'yyyy-MM-dd'),
     notes: '',
-    supplier: type === 'Carico' ? '' : undefined,
+    supplier: type === 'Carico' ? (suppliers[0] || '') : undefined,
     assignee: type === 'Scarico' ? (users.length > 0 ? `${users[0].firstName} ${users[0].lastName}` : '') : undefined,
   });
 
   const [isAddingNewType, setIsAddingNewType] = useState(false);
   const [isAddingNewBrand, setIsAddingNewBrand] = useState(false);
+  const [isAddingNewSupplier, setIsAddingNewSupplier] = useState(false);
   const [newType, setNewType] = useState('');
   const [newBrand, setNewBrand] = useState('');
+  const [newSupplier, setNewSupplier] = useState('');
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -1315,12 +1394,13 @@ function MovementModal({ type, onClose, onSubmit, productTypes, brands, users, i
           const finalData = { ...formData };
           if (isAddingNewType && newType) finalData.productName = newType;
           if (isAddingNewBrand && newBrand) finalData.brand = newBrand;
+          if (isAddingNewSupplier && newSupplier) finalData.supplier = newSupplier;
           onSubmit(finalData); 
         }}>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <div className="flex justify-between items-center">
-                <label className="text-sm font-medium text-gray-700">Tipo Prodotto</label>
+                <label className="text-sm font-medium text-gray-700">Prodotto</label>
                 <button 
                   type="button" 
                   onClick={() => setIsAddingNewType(!isAddingNewType)}
@@ -1332,7 +1412,7 @@ function MovementModal({ type, onClose, onSubmit, productTypes, brands, users, i
               {isAddingNewType ? (
                 <input 
                   type="text" 
-                  placeholder="Inserisci nuovo tipo..."
+                  placeholder="Inserisci nuovo prodotto..."
                   className="w-full bg-gray-50 border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500"
                   value={newType}
                   onChange={(e) => setNewType(e.target.value)}
@@ -1432,15 +1512,36 @@ function MovementModal({ type, onClose, onSubmit, productTypes, brands, users, i
 
           {type === 'Carico' ? (
             <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Fornitore / Origine</label>
-              <input 
-                type="text" 
-                placeholder="es. Amazon, Rientro Aziendale..."
-                className="w-full bg-gray-50 border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500"
-                value={formData.supplier}
-                onChange={(e) => setFormData({ ...formData, supplier: e.target.value })}
-                required
-              />
+              <div className="flex justify-between items-center">
+                <label className="text-sm font-medium text-gray-700">Fornitore / Origine</label>
+                <button 
+                  type="button" 
+                  onClick={() => setIsAddingNewSupplier(!isAddingNewSupplier)}
+                  className="text-[10px] text-indigo-600 hover:underline"
+                >
+                  {isAddingNewSupplier ? 'Seleziona esistente' : '+ Aggiungi nuovo'}
+                </button>
+              </div>
+              {isAddingNewSupplier ? (
+                <input 
+                  type="text" 
+                  placeholder="es. Amazon, Rientro Aziendale..."
+                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500"
+                  value={newSupplier}
+                  onChange={(e) => setNewSupplier(e.target.value)}
+                  required
+                />
+              ) : (
+                <select 
+                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500"
+                  value={formData.supplier}
+                  onChange={(e) => setFormData({ ...formData, supplier: e.target.value })}
+                  required
+                >
+                  <option value="">-- Seleziona Fornitore --</option>
+                  {suppliers.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              )}
             </div>
           ) : (
             <div className="space-y-2">

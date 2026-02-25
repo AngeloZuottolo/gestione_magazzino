@@ -19,6 +19,10 @@ db.exec(`
     name TEXT PRIMARY KEY
   );
 
+  CREATE TABLE IF NOT EXISTS suppliers (
+    name TEXT PRIMARY KEY
+  );
+
   CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     firstName TEXT,
@@ -81,6 +85,26 @@ app.post("/api/brands", (req, res) => {
 
 app.delete("/api/brands/:name", (req, res) => {
   db.prepare("DELETE FROM brands WHERE name = ?").run(req.params.name);
+  res.json({ success: true });
+});
+
+app.get("/api/suppliers", (req, res) => {
+  const rows = db.prepare("SELECT name FROM suppliers").all();
+  res.json(rows.map((r: any) => r.name));
+});
+
+app.post("/api/suppliers", (req, res) => {
+  const { name } = req.body;
+  try {
+    db.prepare("INSERT INTO suppliers (name) VALUES (?)").run(name);
+    res.status(201).json({ success: true });
+  } catch (e) {
+    res.status(400).json({ error: "Already exists" });
+  }
+});
+
+app.delete("/api/suppliers/:name", (req, res) => {
+  db.prepare("DELETE FROM suppliers WHERE name = ?").run(req.params.name);
   res.json({ success: true });
 });
 
