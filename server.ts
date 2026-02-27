@@ -1,165 +1,378 @@
+import dotenv from "dotenv";
 import express from "express";
 import { createServer as createViteServer } from "vite";
-import Database from "better-sqlite3";
 import path from "path";
 import { fileURLToPath } from "url";
+import { createClient } from "@supabase/supabase-js";
+
+dotenv.config();
+
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  throw new Error("Impostare SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY prima di avviare il server.");
+}
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+const INITIAL_PRODUCT_TYPES = [
+  "Monitor",
+  "Laptop",
+  "Docking Station",
+  "Mouse",
+  "Tastiera",
+  "Cuffie"
+];
+
+const INITIAL_BRANDS = [
+  "Dell",
+  "HP",
+  "Lenovo",
+  "Apple",
+  "Logitech",
+  "Microsoft"
+];
+
+const DEFAULT_USERS = [
+  { id: "U-1", first_name: "Mario", last_name: "Rossi", location: "Milano" },
+  { id: "U-2", first_name: "Giulia", last_name: "Bianchi", location: "Roma" }
+];
+
+const ADMIN_CREDENTIALS = {
+  username: "admin",
+  password: "admin1232"
+};
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const db = new Database("warehouse.db");
+function mapMovement(row: any) {
+  return {
+    id: row.id,
+    type: row.type,
+    productName: row.product_name ?? "",
+    brand: row.brand ?? "",
+    quantity: row.quantity ?? 0,
+    isNew: !!row.is_new,
+    date: row.date ?? "",
+    notes: row.notes ?? "",
+    supplier: row.supplier ?? "",
+    assignee: row.assignee ?? ""
+  };
+}
 
-// Initialize Database
-db.exec(`
-  CREATE TABLE IF NOT EXISTS product_types (
-    name TEXT PRIMARY KEY
-  );
+function mapUser(row: any) {
+  return {
+    id: row.id,
+    firstName: row.first_name ?? "",
+    lastName: row.last_name ?? "",
+    location: row.location ?? ""
+  };
+}
 
-  CREATE TABLE IF NOT EXISTS brands (
-    name TEXT PRIMARY KEY
-  );
+function respondWithError(res: express.Response, error: unknown, fallback: string) {
+  console.error(error);
+  const message =
+    typeof error === "object" && error !== null && "message" in error
+      ? String((error as { message?: string }).message ?? fallback)
+      : fallback;
+  res.status(500).json({ error: message });
+}
 
-  CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    firstName TEXT,
-    lastName TEXT,
-    location TEXT
-  );
+async function ensureInitialData() {
+  await ensureListHasItems("product_types", INITIAL_PRODUCT_TYPES);
+  await ensureListHasItems("brands", INITIAL_BRANDS);
+  await ensureUsers();
+  await ensureAdminUser();
+}
 
-  CREATE TABLE IF NOT EXISTS movements (
-    id TEXT PRIMARY KEY,
-    type TEXT,
-    productName TEXT,
-    brand TEXT,
-    quantity INTEGER,
-    isNew INTEGER,
-    date TEXT,
-    notes TEXT,
-    supplier TEXT,
-    assignee TEXT
-  );
+async function ensureListHasItems(table: string, values: string[]) {
+  try {
+    const { data } = await supabase.from(table).select("name").limit(1);
+    if (!data || data.length === 0) {
+      await supabase.from(table).insert(values.map((name) => ({ name })));
+    }
+  } catch (error) {
+    console.warn(`Impossibile popolare ${table}:`, error);
+  }
+}
 
-  CREATE TABLE IF NOT EXISTS auth_users (
-    username TEXT PRIMARY KEY,
-    password TEXT
-  );
-`);
+async function ensureUsers() {
+  try {
+    const { data } = await supabase.from("users").select("id").limit(1);
+    if (!data || data.length === 0) {
+      await supabase.from("users").insert(DEFAULT_USERS);
+    }
+  } catch (error) {
+    console.warn("Impossibile popolare utenti iniziali:", error);
+  }
+}
 
-// Seed admin user
-const adminExists = db.prepare("SELECT * FROM auth_users WHERE username = 'admin'").get();
-if (!adminExists) {
-  db.prepare("INSERT INTO auth_users (username, password) VALUES (?, ?)").run('admin', 'admin1232');
+async function ensureAdminUser() {
+  try {
+    const { data } = await supabase
+      .from("auth_users")
+      .select("username")
+      .eq("username", ADMIN_CREDENTIALS.username)
+      .limit(1);
+
+    if (!data || data.length === 0) {
+      await supabase.from("auth_users").insert(ADMIN_CREDENTIALS);
+    }
+  } catch (error) {
+    console.warn("Impossibile creare l'utente admin:", error);
+  }
 }
 
 async function startServer() {
+  await ensureInitialData();
+
   const app = express();
   const PORT = 3000;
 
   app.use(express.json());
 
-  // Auth Route
-  app.post("/api/login", (req, res) => {
+  app.post("/api/login", async (req, res) => {
     const { username, password } = req.body;
-    const user = db.prepare("SELECT * FROM auth_users WHERE username = ? AND password = ?").get(username, password);
-    if (user) {
-      res.json({ success: true, username: user.username });
-    } else {
-      res.status(401).json({ error: "Credenziali non valide" });
+
+    if (!username || !password) {
+      return res.status(400).json({ error: "username e password richiesti" });
     }
-  });
 
-  // API Routes
-  app.get("/api/product_types", (req, res) => {
-    const rows = db.prepare("SELECT name FROM product_types").all();
-    res.json(rows.map((r: any) => r.name));
-  });
-
-  app.post("/api/product_types", (req, res) => {
-    const { name } = req.body;
     try {
-      db.prepare("INSERT INTO product_types (name) VALUES (?)").run(name);
-      res.status(201).json({ success: true });
-    } catch (e) {
-      res.status(400).json({ error: "Already exists" });
+      const { data, error } = await supabase
+        .from("auth_users")
+        .select("username")
+        .eq("username", username)
+        .eq("password", password)
+        .maybeSingle();
+
+      if (error) {
+        return res.status(500).json({ error: error.message });
+      }
+
+      if (data) {
+        return res.json({ success: true, username: data.username });
+      }
+
+      return res.status(401).json({ error: "Credenziali non valide" });
+    } catch (error) {
+      respondWithError(res, error, "Errore durante l'autenticazione");
     }
   });
 
-  app.delete("/api/product_types/:name", (req, res) => {
-    db.prepare("DELETE FROM product_types WHERE name = ?").run(req.params.name);
-    res.json({ success: true });
-  });
-
-  app.get("/api/brands", (req, res) => {
-    const rows = db.prepare("SELECT name FROM brands").all();
-    res.json(rows.map((r: any) => r.name));
-  });
-
-  app.post("/api/brands", (req, res) => {
-    const { name } = req.body;
+  // Product types
+  app.get("/api/product_types", async (req, res) => {
     try {
-      db.prepare("INSERT INTO brands (name) VALUES (?)").run(name);
-      res.status(201).json({ success: true });
-    } catch (e) {
-      res.status(400).json({ error: "Already exists" });
+      const { data, error } = await supabase.from("product_types").select("name").order("name");
+      if (error) throw error;
+      const names = data ?? [];
+      res.json(names.map((row) => row.name));
+    } catch (error) {
+      respondWithError(res, error, "Impossibile caricare i tipi di prodotto");
     }
   });
 
-  app.delete("/api/brands/:name", (req, res) => {
-    db.prepare("DELETE FROM brands WHERE name = ?").run(req.params.name);
-    res.json({ success: true });
+  app.post("/api/product_types", async (req, res) => {
+    const { name } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: "Il nome è obbligatorio" });
+    }
+
+    try {
+      const { error } = await supabase.from("product_types").insert({ name });
+      if (error) {
+        const message = error.code === "23505" ? "Already exists" : error.message;
+        return res.status(400).json({ error: message });
+      }
+      res.status(201).json({ success: true });
+    } catch (error) {
+      respondWithError(res, error, "Impossibile salvare il tipo di prodotto");
+    }
   });
 
-  app.get("/api/users", (req, res) => {
-    const rows = db.prepare("SELECT * FROM users").all();
-    res.json(rows);
+  app.delete("/api/product_types/:name", async (req, res) => {
+    try {
+      await supabase.from("product_types").delete().eq("name", req.params.name);
+      res.json({ success: true });
+    } catch (error) {
+      respondWithError(res, error, "Impossibile eliminare il tipo di prodotto");
+    }
   });
 
-  app.post("/api/users", (req, res) => {
+  // Brands
+  app.get("/api/brands", async (req, res) => {
+    try {
+      const { data, error } = await supabase.from("brands").select("name").order("name");
+      if (error) throw error;
+      const names = data ?? [];
+      res.json(names.map((row) => row.name));
+    } catch (error) {
+      respondWithError(res, error, "Impossibile caricare le marche");
+    }
+  });
+
+  app.post("/api/brands", async (req, res) => {
+    const { name } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: "Il nome è obbligatorio" });
+    }
+
+    try {
+      const { error } = await supabase.from("brands").insert({ name });
+      if (error) {
+        const message = error.code === "23505" ? "Already exists" : error.message;
+        return res.status(400).json({ error: message });
+      }
+      res.status(201).json({ success: true });
+    } catch (error) {
+      respondWithError(res, error, "Impossibile salvare la marca");
+    }
+  });
+
+  app.delete("/api/brands/:name", async (req, res) => {
+    try {
+      await supabase.from("brands").delete().eq("name", req.params.name);
+      res.json({ success: true });
+    } catch (error) {
+      respondWithError(res, error, "Impossibile eliminare la marca");
+    }
+  });
+
+  // Users
+  app.get("/api/users", async (req, res) => {
+    try {
+      const { data, error } = await supabase.from("users").select("*").order("id");
+      if (error) throw error;
+      const rows = data ?? [];
+      res.json(rows.map(mapUser));
+    } catch (error) {
+      respondWithError(res, error, "Impossibile caricare gli utenti");
+    }
+  });
+
+  app.post("/api/users", async (req, res) => {
     const { id, firstName, lastName, location } = req.body;
-    db.prepare("INSERT INTO users (id, firstName, lastName, location) VALUES (?, ?, ?, ?)")
-      .run(id, firstName, lastName, location);
-    res.status(201).json({ success: true });
+
+    if (!id || !firstName || !lastName || !location) {
+      return res.status(400).json({ error: "Tutti i campi sono obbligatori" });
+    }
+
+    try {
+      const { error } = await supabase.from("users").insert({
+        id,
+        first_name: firstName,
+        last_name: lastName,
+        location
+      });
+
+      if (error) {
+        return res.status(400).json({ error: error.message });
+      }
+
+      res.status(201).json({ success: true });
+    } catch (error) {
+      respondWithError(res, error, "Impossibile salvare l'utente");
+    }
   });
 
-  app.delete("/api/users/:id", (req, res) => {
-    db.prepare("DELETE FROM users WHERE id = ?").run(req.params.id);
-    res.json({ success: true });
+  app.delete("/api/users/:id", async (req, res) => {
+    try {
+      await supabase.from("users").delete().eq("id", req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      respondWithError(res, error, "Impossibile eliminare l'utente");
+    }
   });
 
-  app.get("/api/movements", (req, res) => {
-    const rows = db.prepare("SELECT * FROM movements ORDER BY date DESC").all();
-    res.json(rows.map((r: any) => ({ ...r, isNew: !!r.isNew })));
+  // Movements
+  app.get("/api/movements", async (req, res) => {
+    try {
+      const { data, error } = await supabase
+        .from("movements")
+        .select("*")
+        .order("date", { ascending: false });
+
+      if (error) throw error;
+
+      const rows = data ?? [];
+      res.json(rows.map(mapMovement));
+    } catch (error) {
+      respondWithError(res, error, "Impossibile caricare i movimenti");
+    }
   });
 
-  app.post("/api/movements", (req, res) => {
-    const m = req.body;
-    db.prepare(`
-      INSERT INTO movements (id, type, productName, brand, quantity, isNew, date, notes, supplier, assignee)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(m.id, m.type, m.productName, m.brand, m.quantity, m.isNew ? 1 : 0, m.date, m.notes, m.supplier, m.assignee);
-    res.status(201).json({ success: true });
+  app.post("/api/movements", async (req, res) => {
+    const movement = req.body;
+
+    try {
+      const { error } = await supabase.from("movements").insert({
+        id: movement.id,
+        type: movement.type,
+        product_name: movement.productName,
+        brand: movement.brand,
+        quantity: movement.quantity,
+        is_new: movement.isNew,
+        date: movement.date,
+        notes: movement.notes,
+        supplier: movement.supplier,
+        assignee: movement.assignee
+      });
+
+      if (error) {
+        return res.status(400).json({ error: error.message });
+      }
+
+      res.status(201).json({ success: true });
+    } catch (error) {
+      respondWithError(res, error, "Impossibile salvare il movimento");
+    }
   });
 
-  app.put("/api/movements/:id", (req, res) => {
-    const m = req.body;
-    db.prepare(`
-      UPDATE movements 
-      SET productName = ?, brand = ?, quantity = ?, isNew = ?, date = ?, notes = ?, supplier = ?, assignee = ?
-      WHERE id = ?
-    `).run(m.productName, m.brand, m.quantity, m.isNew ? 1 : 0, m.date, m.notes, m.supplier, m.assignee, req.params.id);
-    res.json({ success: true });
+  app.put("/api/movements/:id", async (req, res) => {
+    const movement = req.body;
+
+    try {
+      const { error } = await supabase
+        .from("movements")
+        .update({
+          product_name: movement.productName,
+          brand: movement.brand,
+          quantity: movement.quantity,
+          is_new: movement.isNew,
+          date: movement.date,
+          notes: movement.notes,
+          supplier: movement.supplier,
+          assignee: movement.assignee
+        })
+        .eq("id", req.params.id);
+
+      if (error) {
+        return res.status(400).json({ error: error.message });
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      respondWithError(res, error, "Impossibile aggiornare il movimento");
+    }
   });
 
-  app.delete("/api/movements/:id", (req, res) => {
-    db.prepare("DELETE FROM movements WHERE id = ?").run(req.params.id);
-    res.json({ success: true });
+  app.delete("/api/movements/:id", async (req, res) => {
+    try {
+      await supabase.from("movements").delete().eq("id", req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      respondWithError(res, error, "Impossibile eliminare il movimento");
+    }
   });
 
-  // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: "spa",
+      appType: "spa"
     });
     app.use(vite.middlewares);
   } else {
