@@ -375,16 +375,25 @@ async function startServer() {
       appType: "spa"
     });
     app.use(vite.middlewares);
-  } else {
+    
+    const PORT = 3000;
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  } else if (!process.env.VERCEL) {
+    // Production but not Vercel (e.g. standard VPS)
     app.use(express.static(path.join(__dirname, "dist")));
     app.get("*", (req, res) => {
       res.sendFile(path.join(__dirname, "dist", "index.html"));
     });
+    
+    const PORT = 3000;
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
   }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
 }
 
-startServer();
+init();
+
+export default app;
