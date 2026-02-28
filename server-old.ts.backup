@@ -3,24 +3,18 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
 
 dotenv.config();
 
-let supabaseClient: SupabaseClient | null = null;
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-function getSupabase(): SupabaseClient {
-  if (!supabaseClient) {
-    const SUPABASE_URL = process.env.SUPABASE_URL;
-    const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-      throw new Error("Impostare SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY prima di avviare il server.");
-    }
-    supabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-  }
-  return supabaseClient;
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  throw new Error("Impostare SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY prima di avviare il server.");
 }
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 const INITIAL_PRODUCT_TYPES = [
   "Monitor",
@@ -95,9 +89,9 @@ async function ensureInitialData() {
 
 async function ensureListHasItems(table: string, values: string[]) {
   try {
-    const { data } = await getSupabase().from(table).select("name").limit(1);
+    const { data } = await supabase.from(table).select("name").limit(1);
     if (!data || data.length === 0) {
-      await getSupabase().from(table).insert(values.map((name) => ({ name })));
+      await supabase.from(table).insert(values.map((name) => ({ name })));
     }
   } catch (error) {
     console.warn(`Impossibile popolare ${table}:`, error);
@@ -106,9 +100,9 @@ async function ensureListHasItems(table: string, values: string[]) {
 
 async function ensureUsers() {
   try {
-    const { data } = await getSupabase().from("users").select("id").limit(1);
+    const { data } = await supabase.from("users").select("id").limit(1);
     if (!data || data.length === 0) {
-      await getSupabase().from("users").insert(DEFAULT_USERS);
+      await supabase.from("users").insert(DEFAULT_USERS);
     }
   } catch (error) {
     console.warn("Impossibile popolare utenti iniziali:", error);
@@ -117,14 +111,14 @@ async function ensureUsers() {
 
 async function ensureAdminUser() {
   try {
-    const { data } = await getSupabase()
+    const { data } = await supabase
       .from("auth_users")
       .select("username")
       .eq("username", ADMIN_CREDENTIALS.username)
       .limit(1);
 
     if (!data || data.length === 0) {
-      await getSupabase().from("auth_users").insert(ADMIN_CREDENTIALS);
+      await supabase.from("auth_users").insert(ADMIN_CREDENTIALS);
     }
   } catch (error) {
     console.warn("Impossibile creare l'utente admin:", error);
@@ -147,7 +141,7 @@ async function startServer() {
     }
 
     try {
-      const { data, error } = await getSupabase()
+      const { data, error } = await supabase
         .from("auth_users")
         .select("username")
         .eq("username", username)
@@ -171,7 +165,7 @@ async function startServer() {
   // Product types
   app.get("/api/product_types", async (req, res) => {
     try {
-      const { data, error } = await getSupabase().from("product_types").select("name").order("name");
+      const { data, error } = await supabase.from("product_types").select("name").order("name");
       if (error) throw error;
       const names = data ?? [];
       res.json(names.map((row) => row.name));
@@ -188,7 +182,7 @@ async function startServer() {
     }
 
     try {
-      const { error } = await getSupabase().from("product_types").insert({ name });
+      const { error } = await supabase.from("product_types").insert({ name });
       if (error) {
         const message = error.code === "23505" ? "Already exists" : error.message;
         return res.status(400).json({ error: message });
@@ -201,7 +195,7 @@ async function startServer() {
 
   app.delete("/api/product_types/:name", async (req, res) => {
     try {
-      await getSupabase().from("product_types").delete().eq("name", req.params.name);
+      await supabase.from("product_types").delete().eq("name", req.params.name);
       res.json({ success: true });
     } catch (error) {
       respondWithError(res, error, "Impossibile eliminare il tipo di prodotto");
@@ -211,7 +205,7 @@ async function startServer() {
   // Brands
   app.get("/api/brands", async (req, res) => {
     try {
-      const { data, error } = await getSupabase().from("brands").select("name").order("name");
+      const { data, error } = await supabase.from("brands").select("name").order("name");
       if (error) throw error;
       const names = data ?? [];
       res.json(names.map((row) => row.name));
@@ -228,7 +222,7 @@ async function startServer() {
     }
 
     try {
-      const { error } = await getSupabase().from("brands").insert({ name });
+      const { error } = await supabase.from("brands").insert({ name });
       if (error) {
         const message = error.code === "23505" ? "Already exists" : error.message;
         return res.status(400).json({ error: message });
@@ -241,57 +235,17 @@ async function startServer() {
 
   app.delete("/api/brands/:name", async (req, res) => {
     try {
-      await getSupabase().from("brands").delete().eq("name", req.params.name);
+      await supabase.from("brands").delete().eq("name", req.params.name);
       res.json({ success: true });
     } catch (error) {
       respondWithError(res, error, "Impossibile eliminare la marca");
     }
   });
 
-  // Suppliers
-  app.get("/api/suppliers", async (req, res) => {
-    try {
-      const { data, error } = await getSupabase().from("suppliers").select("name").order("name");
-      if (error) throw error;
-      const names = data ?? [];
-      res.json(names.map((row) => row.name));
-    } catch (error) {
-      respondWithError(res, error, "Impossibile caricare i fornitori");
-    }
-  });
-
-  app.post("/api/suppliers", async (req, res) => {
-    const { name } = req.body;
-
-    if (!name) {
-      return res.status(400).json({ error: "Il nome è obbligatorio" });
-    }
-
-    try {
-      const { error } = await getSupabase().from("suppliers").insert({ name });
-      if (error) {
-        const message = error.code === "23505" ? "Already exists" : error.message;
-        return res.status(400).json({ error: message });
-      }
-      res.status(201).json({ success: true });
-    } catch (error) {
-      respondWithError(res, error, "Impossibile salvare il fornitore");
-    }
-  });
-
-  app.delete("/api/suppliers/:name", async (req, res) => {
-    try {
-      await getSupabase().from("suppliers").delete().eq("name", req.params.name);
-      res.json({ success: true });
-    } catch (error) {
-      respondWithError(res, error, "Impossibile eliminare il fornitore");
-    }
-  });
-
   // Users
   app.get("/api/users", async (req, res) => {
     try {
-      const { data, error } = await getSupabase().from("users").select("*").order("id");
+      const { data, error } = await supabase.from("users").select("*").order("id");
       if (error) throw error;
       const rows = data ?? [];
       res.json(rows.map(mapUser));
@@ -308,7 +262,7 @@ async function startServer() {
     }
 
     try {
-      const { error } = await getSupabase().from("users").insert({
+      const { error } = await supabase.from("users").insert({
         id,
         first_name: firstName,
         last_name: lastName,
@@ -327,7 +281,7 @@ async function startServer() {
 
   app.delete("/api/users/:id", async (req, res) => {
     try {
-      await getSupabase().from("users").delete().eq("id", req.params.id);
+      await supabase.from("users").delete().eq("id", req.params.id);
       res.json({ success: true });
     } catch (error) {
       respondWithError(res, error, "Impossibile eliminare l'utente");
@@ -337,7 +291,7 @@ async function startServer() {
   // Movements
   app.get("/api/movements", async (req, res) => {
     try {
-      const { data, error } = await getSupabase()
+      const { data, error } = await supabase
         .from("movements")
         .select("*")
         .order("date", { ascending: false });
@@ -355,7 +309,7 @@ async function startServer() {
     const movement = req.body;
 
     try {
-      const { error } = await getSupabase().from("movements").insert({
+      const { error } = await supabase.from("movements").insert({
         id: movement.id,
         type: movement.type,
         product_name: movement.productName,
@@ -382,7 +336,7 @@ async function startServer() {
     const movement = req.body;
 
     try {
-      const { error } = await getSupabase()
+      const { error } = await supabase
         .from("movements")
         .update({
           product_name: movement.productName,
@@ -408,7 +362,7 @@ async function startServer() {
 
   app.delete("/api/movements/:id", async (req, res) => {
     try {
-      await getSupabase().from("movements").delete().eq("id", req.params.id);
+      await supabase.from("movements").delete().eq("id", req.params.id);
       res.json({ success: true });
     } catch (error) {
       respondWithError(res, error, "Impossibile eliminare il movimento");
@@ -438,10 +392,7 @@ async function startServer() {
       console.log(`Server running on http://localhost:${PORT}`);
     });
   }
-
-  return app;
 }
 
-const appPromise = startServer();
+startServer();
 
-export default appPromise;
