@@ -442,19 +442,6 @@ async function startServer() {
   return app;
 }
 
-
-// 1. Creiamo la Promise dell'app
 const appPromise = startServer();
 
-// 2. Esportiamo una funzione handler standard per Vercel
-export default async function handler(req: any, res: any) {
-  try {
-    // Aspettiamo che l'app Express sia pronta
-    const app = await appPromise;
-    // Passiamo la richiesta e la risposta ad Express
-    return app(req, res);
-  } catch (error) {
-    console.error("Errore critico nell'avvio del server:", error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-}
+export default appPromise;
