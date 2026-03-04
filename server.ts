@@ -40,14 +40,23 @@ const INITIAL_BRANDS = [
   "Microsoft"
 ];
 
+const INITIAL_LOCATIONS = [
+  "Milano",
+  "Madrid",
+  "Barcellona",
+  "Roma",
+  "Parigi",
+  "Londra"
+];
+
 const DEFAULT_USERS = [
   { id: "U-1", first_name: "Mario", last_name: "Rossi", location: "Milano" },
   { id: "U-2", first_name: "Giulia", last_name: "Bianchi", location: "Roma" }
 ];
 
 const ADMIN_CREDENTIALS = {
-  username: "admin",
-  password: "admin1232"
+  username: process.env.ADMIN_USERNAME || "admin",
+  password: process.env.ADMIN_PASSWORD
 };
 
 const __filename = fileURLToPath(import.meta.url);
@@ -89,6 +98,7 @@ function respondWithError(res: express.Response, error: unknown, fallback: strin
 async function ensureInitialData() {
   await ensureListHasItems("product_types", INITIAL_PRODUCT_TYPES);
   await ensureListHasItems("brands", INITIAL_BRANDS);
+  await ensureListHasItems("locations", INITIAL_LOCATIONS);
   await ensureUsers();
   await ensureAdminUser();
 }
@@ -116,6 +126,11 @@ async function ensureUsers() {
 }
 
 async function ensureAdminUser() {
+  if (!ADMIN_CREDENTIALS.password) {
+    console.warn("Nessuna password admin configurata. Imposta la variabile d'ambiente ADMIN_PASSWORD.");
+    return;
+  }
+
   try {
     const { data } = await getSupabase()
       .from("auth_users")
@@ -288,6 +303,46 @@ async function startServer() {
     }
   });
 
+  // Locations
+  app.get("/api/locations", async (req, res) => {
+    try {
+      const { data, error } = await getSupabase().from("locations").select("name").order("name");
+      if (error) throw error;
+      const names = data ?? [];
+      res.json(names.map((row) => row.name));
+    } catch (error) {
+      respondWithError(res, error, "Impossibile caricare le sedi");
+    }
+  });
+
+  app.post("/api/locations", async (req, res) => {
+    const { name } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: "Il nome è obbligatorio" });
+    }
+
+    try {
+      const { error } = await getSupabase().from("locations").insert({ name });
+      if (error) {
+        const message = error.code === "23505" ? "Already exists" : error.message;
+        return res.status(400).json({ error: message });
+      }
+      res.status(201).json({ success: true });
+    } catch (error) {
+      respondWithError(res, error, "Impossibile salvare la sede");
+    }
+  });
+
+  app.delete("/api/locations/:name", async (req, res) => {
+    try {
+      await getSupabase().from("locations").delete().eq("name", req.params.name);
+      res.json({ success: true });
+    } catch (error) {
+      respondWithError(res, error, "Impossibile eliminare la sede");
+    }
+  });
+
   // Users
   app.get("/api/users", async (req, res) => {
     try {
@@ -322,6 +377,33 @@ async function startServer() {
       res.status(201).json({ success: true });
     } catch (error) {
       respondWithError(res, error, "Impossibile salvare l'utente");
+    }
+  });
+
+  app.put("/api/users/:id", async (req, res) => {
+    const { firstName, lastName, location } = req.body;
+
+    if (!firstName || !lastName || !location) {
+      return res.status(400).json({ error: "Tutti i campi sono obbligatori" });
+    }
+
+    try {
+      const { error } = await getSupabase()
+        .from("users")
+        .update({
+          first_name: firstName,
+          last_name: lastName,
+          location
+        })
+        .eq("id", req.params.id);
+
+      if (error) {
+        return res.status(400).json({ error: error.message });
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      respondWithError(res, error, "Impossibile aggiornare l'utente");
     }
   });
 

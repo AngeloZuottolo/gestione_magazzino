@@ -43,6 +43,7 @@ export default function App() {
   const [movements, setMovements] = useState<Movement[]>([]);
   const [productTypes, setProductTypes] = useState<string[]>([]);
   const [brands, setBrands] = useState<string[]>([]);
+  const [locations, setLocations] = useState<string[]>([]);
   const [suppliers, setSuppliers] = useState<string[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -55,26 +56,40 @@ export default function App() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [movRes, typeRes, brandRes, supplierRes, userRes] = await Promise.all([
+        const [movRes, typeRes, brandRes, supplierRes, userRes, locRes] = await Promise.all([
           fetch('/api/movements'),
           fetch('/api/product_types'),
           fetch('/api/brands'),
           fetch('/api/suppliers'),
-          fetch('/api/users')
+          fetch('/api/users'),
+          fetch('/api/locations')
         ]);
 
-        const [movData, typeData, brandData, supplierData, userData] = await Promise.all([
+        const [movData, typeData, brandData, supplierData, userData, locData] = await Promise.all([
           movRes.json(),
           typeRes.json(),
           brandRes.json(),
           supplierRes.json(),
-          userRes.json()
+          userRes.json(),
+          locRes.json()
         ]);
 
-        setMovements(movData);
-        setSuppliers(supplierData);
+        setMovements(Array.isArray(movData) ? movData : []);
+        setSuppliers(Array.isArray(supplierData) ? supplierData : []);
+        if (Array.isArray(locData) && locData.length > 0) {
+          setLocations(locData);
+        } else {
+          for (const loc of INITIAL_LOCATIONS) {
+            await fetch('/api/locations', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: loc })
+            });
+          }
+          setLocations(INITIAL_LOCATIONS);
+        }
         
-        if (typeData.length > 0) {
+        if (Array.isArray(typeData) && typeData.length > 0) {
           setProductTypes(typeData);
         } else {
           // Initialize with defaults if empty
@@ -88,7 +103,7 @@ export default function App() {
           setProductTypes(INITIAL_PRODUCT_TYPES);
         }
 
-        if (brandData.length > 0) {
+        if (Array.isArray(brandData) && brandData.length > 0) {
           setBrands(brandData);
         } else {
           for (const brand of INITIAL_BRANDS) {
@@ -101,7 +116,7 @@ export default function App() {
           setBrands(INITIAL_BRANDS);
         }
 
-        if (userData.length > 0) {
+        if (Array.isArray(userData) && userData.length > 0) {
           setUsers(userData);
         } else {
           const initialUsers: User[] = [
@@ -309,6 +324,30 @@ export default function App() {
     }
   };
 
+  const addLocation = async (name: string) => {
+    if (name && !locations.includes(name)) {
+      try {
+        await fetch('/api/locations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        });
+        setLocations(prev => [...prev, name].sort());
+      } catch (error) {
+        console.error("Error adding location:", error);
+      }
+    }
+  };
+
+  const removeLocation = async (name: string) => {
+    try {
+      await fetch(`/api/locations/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      setLocations(prev => prev.filter(l => l !== name));
+    } catch (error) {
+      console.error("Error removing location:", error);
+    }
+  };
+
   const addUser = async (u: Omit<User, 'id'>) => {
     const nextId = users.length > 0 
       ? Math.max(...users.map(user => parseInt(user.id.split('-')[1]))) + 1 
@@ -425,6 +464,11 @@ export default function App() {
               </div>
             )}
           </div>
+          {isSidebarOpen && (
+            <div className="mt-4 text-center text-xs text-gray-400">
+              v1.0
+            </div>
+          )}
         </div>
       </aside>
 
@@ -564,7 +608,7 @@ export default function App() {
           )}
 
           {activeTab === 'users' && (
-            <UsersView users={users} onAdd={addUser} onDelete={deleteUser} />
+            <UsersView users={users} locations={locations} onAdd={addUser} onDelete={deleteUser} />
           )}
 
           {activeTab === 'admin' && (
@@ -578,6 +622,9 @@ export default function App() {
               suppliers={suppliers}
               onAddSupplier={addSupplier}
               onRemoveSupplier={removeSupplier}
+              locations={locations}
+              onAddLocation={addLocation}
+              onRemoveLocation={removeLocation}
               movements={movements}
               onEdit={(m) => setShowMovementModal({ show: true, type: m.type, editId: m.id })}
               onDelete={deleteMovement}
@@ -1050,7 +1097,7 @@ function ReportsView({ movements, users }: { movements: Movement[], users: User[
   );
 }
 
-function AdminView({ productTypes, onAddType, onRemoveType, brands, onAddBrand, onRemoveBrand, suppliers, onAddSupplier, onRemoveSupplier, movements, onEdit, onDelete }: { 
+function AdminView({ productTypes, onAddType, onRemoveType, brands, onAddBrand, onRemoveBrand, suppliers, onAddSupplier, onRemoveSupplier, locations, onAddLocation, onRemoveLocation, movements, onEdit, onDelete }: { 
   productTypes: string[], 
   onAddType: (name: string) => void, 
   onRemoveType: (name: string) => void,
@@ -1060,6 +1107,9 @@ function AdminView({ productTypes, onAddType, onRemoveType, brands, onAddBrand, 
   suppliers: string[],
   onAddSupplier: (name: string) => void,
   onRemoveSupplier: (name: string) => void,
+  locations: string[],
+  onAddLocation: (name: string) => void,
+  onRemoveLocation: (name: string) => void,
   movements: Movement[],
   onEdit: (m: Movement) => void,
   onDelete: (id: string) => void
@@ -1067,6 +1117,7 @@ function AdminView({ productTypes, onAddType, onRemoveType, brands, onAddBrand, 
   const [newType, setNewType] = useState('');
   const [newBrand, setNewBrand] = useState('');
   const [newSupplier, setNewSupplier] = useState('');
+  const [newLocation, setNewLocation] = useState('');
 
   return (
     <motion.div 
@@ -1076,10 +1127,10 @@ function AdminView({ productTypes, onAddType, onRemoveType, brands, onAddBrand, 
     >
       <header>
         <h2 className="text-3xl font-bold tracking-tight">Amministrazione</h2>
-        <p className="text-gray-500">Gestisci i prodotti, le marche, i fornitori e correggi eventuali errori nei movimenti.</p>
+        <p className="text-gray-500">Gestisci i prodotti, le marche, i fornitori, le sedi e correggi eventuali errori nei movimenti.</p>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
         <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
           <h3 className="text-lg font-bold mb-4">Prodotti</h3>
           <div className="flex gap-2 mb-4">
@@ -1175,6 +1226,38 @@ function AdminView({ productTypes, onAddType, onRemoveType, brands, onAddBrand, 
             ))}
           </div>
         </div>
+
+        <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+          <h3 className="text-lg font-bold mb-4">Sedi</h3>
+          <div className="flex gap-2 mb-4">
+            <input 
+              type="text" 
+              placeholder="Nuova sede..." 
+              className="flex-1 bg-gray-50 border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500"
+              value={newLocation}
+              onChange={(e) => setNewLocation(e.target.value)}
+            />
+            <button 
+              onClick={() => { onAddLocation(newLocation); setNewLocation(''); }}
+              className="p-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700"
+            >
+              <Plus size={20} />
+            </button>
+          </div>
+          <div className="grid grid-cols-1 gap-2 max-h-[300px] overflow-y-auto pr-2">
+            {locations.map(l => (
+              <div key={l} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl group">
+                <span className="font-medium text-sm truncate">{l}</span>
+                <button 
+                  onClick={() => onRemoveLocation(l)}
+                  className="p-1 text-red-500 opacity-0 group-hover:opacity-100 hover:bg-red-50 rounded-lg transition-all"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
@@ -1212,10 +1295,10 @@ function AdminView({ productTypes, onAddType, onRemoveType, brands, onAddBrand, 
   );
 }
 
-function UsersView({ users, onAdd, onDelete }: { users: User[], onAdd: (u: Omit<User, 'id'>) => void, onDelete: (id: string) => void }) {
+function UsersView({ users, locations, onAdd, onDelete }: { users: User[], locations: string[], onAdd: (u: Omit<User, 'id'>) => void, onDelete: (id: string) => void }) {
   const [search, setSearch] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newUser, setNewUser] = useState<Omit<User, 'id'>>({ firstName: '', lastName: '', location: INITIAL_LOCATIONS[0] });
+  const [newUser, setNewUser] = useState<Omit<User, 'id'>>({ firstName: '', lastName: '', location: locations[0] || '' });
 
   const filtered = users.filter(u => 
     u.firstName.toLowerCase().includes(search.toLowerCase()) || 
@@ -1328,7 +1411,7 @@ function UsersView({ users, onAdd, onDelete }: { users: User[], onAdd: (u: Omit<
                   onChange={(e) => setNewUser({ ...newUser, location: e.target.value })}
                   required
                 >
-                  {INITIAL_LOCATIONS.map(l => <option key={l} value={l}>{l}</option>)}
+                  {locations.map(l => <option key={l} value={l}>{l}</option>)}
                 </select>
               </div>
               <div className="flex gap-3 pt-4">
