@@ -6,7 +6,6 @@
 export type MovementType = 'Carico' | 'Scarico';
 
 export interface User {
-  id: string;
   firstName: string;
   lastName: string;
   location: string;

@@ -78,12 +78,7 @@ function mapMovement(row: any) {
 }
 
 function mapUser(row: any) {
-  return {
-    id: row.id,
-    firstName: row.first_name ?? "",
-    lastName: row.last_name ?? "",
-    location: row.location ?? ""
-  };
+  return row;
 }
 
 function respondWithError(res: express.Response, error: unknown, fallback: string) {
@@ -356,29 +351,36 @@ async function startServer() {
   });
 
   app.post("/api/users", async (req, res) => {
-    const { id, firstName, lastName, location } = req.body;
+  const { firstName, lastName, location } = req.body;
 
-    if (!id || !firstName || !lastName || !location) {
-      return res.status(400).json({ error: "Tutti i campi sono obbligatori" });
+  if (!firstName || !lastName || !location) {
+    return res.status(400).json({ error: "Tutti i campi sono obbligatori" });
+  }
+
+  try {
+    const { data, error } = await getSupabase()
+      .from("users")
+      .insert([
+        {
+          firstName,
+          lastName,
+          location
+        }
+      ])
+      .select();
+
+    if (error) {
+      console.error(error);
+      return res.status(400).json({ error: error.message });
     }
 
-    try {
-      const { error } = await getSupabase().from("users").insert({
-        id,
-        first_name: firstName,
-        last_name: lastName,
-        location
-      });
+    res.status(201).json(data[0]);
 
-      if (error) {
-        return res.status(400).json({ error: error.message });
-      }
+  } catch (error) {
+    respondWithError(res, error, "Impossibile salvare l'utente");
+  }
+});
 
-      res.status(201).json({ success: true });
-    } catch (error) {
-      respondWithError(res, error, "Impossibile salvare l'utente");
-    }
-  });
 
   app.put("/api/users/:id", async (req, res) => {
     const { firstName, lastName, location } = req.body;

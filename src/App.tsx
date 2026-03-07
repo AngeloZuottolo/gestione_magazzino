@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo ,useRef} from 'react';
 import { 
   LayoutDashboard, 
   Package, 
@@ -26,6 +26,7 @@ import {
   LogOut,
   Lock
 } from 'lucide-react';
+import * as XLSX from "xlsx";
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
@@ -117,25 +118,35 @@ export default function App() {
         }
 
         if (Array.isArray(userData) && userData.length > 0) {
-          setUsers(userData);
-        } else {
-          const initialUsers: User[] = [
-            { id: 'U-1', firstName: 'Mario', lastName: 'Rossi', location: 'Milano' },
-            { id: 'U-2', firstName: 'Giulia', lastName: 'Bianchi', location: 'Roma' },
-          ];
-          for (const user of initialUsers) {
-            await fetch('/api/users', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(user)
-            });
-          }
-          setUsers(initialUsers);
-        }
+  setUsers(userData);
+} else {
+
+  const initialUsers = [
+    { firstName: 'Mario', lastName: 'Rossi', location: 'Milano' },
+    { firstName: 'Giulia', lastName: 'Bianchi', location: 'Roma' }
+  ]
+
+  const createdUsers: User[] = []
+
+  for (const user of initialUsers) {
+    const res = await fetch('/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(user)
+    })
+
+    const created = await res.json()
+    createdUsers.push(created)
+  }
+
+  setUsers(createdUsers)
+}
+
       } catch (error) {
         console.error("Error fetching data:", error);
       }
     };
+
 
     fetchData();
   }, []);
@@ -348,22 +359,21 @@ export default function App() {
     }
   };
 
-  const addUser = async (u: Omit<User, 'id'>) => {
-    const nextId = users.length > 0 
-      ? Math.max(...users.map(user => parseInt(user.id.split('-')[1]))) + 1 
-      : 1;
-    const newUser: User = { ...u, id: `U-${nextId}` };
-    try {
-      await fetch('/api/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newUser)
-      });
-      setUsers(prev => [...prev, newUser]);
-    } catch (error) {
-      console.error("Error adding user:", error);
-    }
-  };
+ const addUser = async (u: Omit<User,'id'>) => {
+  try {
+    const res = await fetch('/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(u)
+    })
+
+    const createdUser = await res.json()
+
+    setUsers(prev => [...prev, createdUser])
+  } catch (error) {
+    console.error(error)
+  }
+}
 
   const deleteUser = async (id: string) => {
     if (confirm('Sei sicuro di voler eliminare questo utente?')) {
@@ -1295,16 +1305,54 @@ function AdminView({ productTypes, onAddType, onRemoveType, brands, onAddBrand, 
   );
 }
 
-function UsersView({ users, locations, onAdd, onDelete }: { users: User[], locations: string[], onAdd: (u: Omit<User, 'id'>) => void, onDelete: (id: string) => void }) {
+function UsersView({ users, locations, onAdd, onDelete }: { 
+  users: User[],
+  locations: string[],
+  onAdd: (u: Omit<User, 'id'>) => void,
+  onDelete: (id: string) => void }) {
   const [search, setSearch] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [newUser, setNewUser] = useState<Omit<User, 'id'>>({ firstName: '', lastName: '', location: locations[0] || '' });
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
 
-  const filtered = users.filter(u => 
-    u.firstName.toLowerCase().includes(search.toLowerCase()) || 
-    u.lastName.toLowerCase().includes(search.toLowerCase()) ||
-    u.location.toLowerCase().includes(search.toLowerCase())
-  );
+  const handleImportExcel = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const data = await file.arrayBuffer();
+    const workbook = XLSX.read(data);
+
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const jsonData: any[] = XLSX.utils.sheet_to_json(sheet);
+
+    for (const row of jsonData) {
+      const user = {
+        firstName: row.firstName || row.Nome,
+        lastName: row.lastName || row.Cognome,
+        location: row.location || row.Sede
+      };
+
+      await fetch("/api/users", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(user)
+      });
+    }
+
+    alert("Utenti importati!");
+};
+
+ const filtered = (users || []).filter(u => {
+  const first = (u.firstName ?? "").toLowerCase();
+  const last = (u.lastName ?? "").toLowerCase();
+  const loc = (u.location ?? "").toLowerCase();
+  const s = search.toLowerCase();
+
+  return first.includes(s) || last.includes(s) || loc.includes(s);
+});
 
   return (
     <motion.div 
@@ -1317,6 +1365,17 @@ function UsersView({ users, locations, onAdd, onDelete }: { users: User[], locat
           <h2 className="text-3xl font-bold tracking-tight">Database Utenti</h2>
           <p className="text-gray-500">Gestisci l'anagrafica dei dipendenti per le assegnazioni.</p>
         </div>
+        <div className="flex gap-2">
+          <button
+  onClick={() => fileInputRef.current?.click()}
+  className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-xl hover:bg-emerald-700">Importa Excel</button>
+        <input
+          type="file"
+          accept=".xlsx,.xls"
+          ref={fileInputRef}
+          onChange={handleImportExcel}
+          hidden
+        />
         <button 
           onClick={() => setShowAddModal(true)}
           className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl hover:bg-indigo-700 transition-colors shadow-sm"
@@ -1324,6 +1383,7 @@ function UsersView({ users, locations, onAdd, onDelete }: { users: User[], locat
           <Plus size={18} />
           Nuovo Utente
         </button>
+        </div>
       </header>
 
       <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
@@ -1426,6 +1486,102 @@ function UsersView({ users, locations, onAdd, onDelete }: { users: User[], locat
   );
 }
 
+function SearchableSelect({ 
+  options, 
+  value, 
+  onChange, 
+  placeholder, 
+  required 
+}: { 
+  options: { label: string, value: string }[], 
+  value: string, 
+  onChange: (val: string) => void, 
+  placeholder?: string,
+  required?: boolean
+}) {
+  const [query, setQuery] = useState('');
+  const [isOpen, setIsOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  const selectedOption = options.find(o => o.value === value);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+        setQuery('');
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const filteredOptions = options.filter(option => 
+    option.label.toLowerCase().includes(query.toLowerCase())
+  );
+
+  return (
+    <div className="relative" ref={wrapperRef}>
+      <div 
+        className={cn(
+          "w-full bg-gray-50 border-none rounded-xl px-4 py-2 focus-within:ring-2 focus-within:ring-indigo-500 flex items-center cursor-text min-h-[40px]",
+          !isOpen && "cursor-pointer"
+        )}
+        onClick={() => setIsOpen(true)}
+      >
+        {isOpen ? (
+          <input
+            type="text"
+            className="w-full bg-transparent border-none p-0 focus:ring-0 text-sm outline-none"
+            placeholder="Cerca..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            autoFocus
+          />
+        ) : (
+          <div className={cn("w-full text-sm", !selectedOption && "text-gray-400")}>
+            {selectedOption ? selectedOption.label : placeholder || "Seleziona..."}
+          </div>
+        )}
+      </div>
+      
+      {/* Hidden input for required validation */}
+      <input 
+        type="text" 
+        value={value} 
+        required={required} 
+        className="absolute opacity-0 w-0 h-0 pointer-events-none" 
+        onChange={() => {}} 
+        tabIndex={-1} 
+      />
+
+      {isOpen && (
+        <ul className="absolute z-50 w-full bg-white border border-gray-200 rounded-xl mt-1 max-h-60 overflow-auto shadow-lg">
+          {filteredOptions.length > 0 ? filteredOptions.map((option, index) => (
+            <li
+              key={index}
+              className={cn(
+                "px-4 py-2 hover:bg-indigo-50 cursor-pointer text-sm",
+                value === option.value ? "bg-indigo-50 text-indigo-700 font-medium" : "text-gray-700"
+              )}
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange(option.value);
+                setQuery('');
+                setIsOpen(false);
+              }}
+            >
+              {option.label}
+            </li>
+          )) : (
+            <li className="px-4 py-2 text-sm text-gray-500">Nessun risultato</li>
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // --- Modals ---
 
 function MovementModal({ type, onClose, onSubmit, productTypes, brands, suppliers, users, initialData }: { 
@@ -1502,14 +1658,13 @@ function MovementModal({ type, onClose, onSubmit, productTypes, brands, supplier
                   required
                 />
               ) : (
-                <select 
-                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500"
+                <SearchableSelect 
+                  options={productTypes.map(t => ({ label: t, value: t }))}
                   value={formData.productName}
-                  onChange={(e) => setFormData({ ...formData, productName: e.target.value })}
+                  onChange={(val) => setFormData({ ...formData, productName: val })}
                   required
-                >
-                  {productTypes.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
+                  placeholder="-- Seleziona Prodotto --"
+                />
               )}
             </div>
             <div className="space-y-2">
@@ -1533,14 +1688,13 @@ function MovementModal({ type, onClose, onSubmit, productTypes, brands, supplier
                   required
                 />
               ) : (
-                <select 
-                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500"
+                <SearchableSelect 
+                  options={brands.map(b => ({ label: b, value: b }))}
                   value={formData.brand}
-                  onChange={(e) => setFormData({ ...formData, brand: e.target.value })}
+                  onChange={(val) => setFormData({ ...formData, brand: val })}
                   required
-                >
-                  {brands.map(b => <option key={b} value={b}>{b}</option>)}
-                </select>
+                  placeholder="-- Seleziona Marca --"
+                />
               )}
             </div>
           </div>
@@ -1615,33 +1769,25 @@ function MovementModal({ type, onClose, onSubmit, productTypes, brands, supplier
                   required
                 />
               ) : (
-                <select 
-                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500"
-                  value={formData.supplier}
-                  onChange={(e) => setFormData({ ...formData, supplier: e.target.value })}
+                <SearchableSelect 
+                  options={suppliers.map(s => ({ label: s, value: s }))}
+                  value={formData.supplier || ''}
+                  onChange={(val) => setFormData({ ...formData, supplier: val })}
                   required
-                >
-                  <option value="">-- Seleziona Fornitore --</option>
-                  {suppliers.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
+                  placeholder="-- Seleziona Fornitore --"
+                />
               )}
             </div>
           ) : (
             <div className="space-y-2">
               <label className="text-sm font-medium text-gray-700">Assegnatario (Dipendente)</label>
-              <select 
-                className="w-full bg-gray-50 border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500"
-                value={formData.assignee}
-                onChange={(e) => setFormData({ ...formData, assignee: e.target.value })}
+              <SearchableSelect 
+                options={users.map(u => ({ label: `${u.firstName} ${u.lastName} (${u.location})`, value: `${u.firstName} ${u.lastName}` }))}
+                value={formData.assignee || ''}
+                onChange={(val) => setFormData({ ...formData, assignee: val })}
                 required
-              >
-                <option value="">-- Seleziona Utente --</option>
-                {users.map(u => (
-                  <option key={u.id} value={`${u.firstName} ${u.lastName}`}>
-                    {u.firstName} {u.lastName} ({u.location})
-                  </option>
-                ))}
-              </select>
+                placeholder="-- Seleziona Utente --"
+              />
             </div>
           )}
 
